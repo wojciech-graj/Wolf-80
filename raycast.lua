@@ -12,7 +12,10 @@ function init()
 	SCREEN_WIDTH = 240
 	SCREEN_HEIGHT = 136
 	FPS_COUNTER = true
-	TEX_SIZES = {[1]={16,16}}
+	TEX_WIDTH = 16
+	TEX_HEIGHT = 16
+	FLOOR_TEX = 3
+	CEIL_TEX = 5
 	pos_x = 22
 	pos_y = 12
 	dir_x = -1
@@ -67,6 +70,7 @@ function TIC()
 	-- draw
 	cls(0)
 
+	-- walls
 	for x=0,SCREEN_WIDTH do
 		local camera_x = 2 * x / SCREEN_WIDTH - 1
 		local ray_dir_x = dir_x + plane_x * camera_x
@@ -115,17 +119,17 @@ function TIC()
 
 		local perp_wall_dist
 		if side == 0 then
-			perp_wall_dist = (map_x - pos_x + (1 - step_x) / 2) / ray_dir_x
+			perp_wall_dist = (map_x - pos_x + (1 - step_x) * 0.5) / ray_dir_x
 		else
-			perp_wall_dist = (map_y - pos_y + (1 - step_y) / 2) / ray_dir_y
+			perp_wall_dist = (map_y - pos_y + (1 - step_y) * 0.5) / ray_dir_y
 		end
 
 		local line_height = math.floor(136 / perp_wall_dist)
-		local draw_start = -line_height / 2 + SCREEN_HEIGHT / 2
+		local draw_start = -line_height * 0.5 + SCREEN_HEIGHT * 0.5
 		if draw_start < 0 then
 			draw_start = 0
 		end
-		local draw_end = line_height / 2 + SCREEN_HEIGHT / 2
+		local draw_end = line_height * 0.5 + SCREEN_HEIGHT * 0.5
 		if draw_end >= SCREEN_HEIGHT then
 			draw_end = SCREEN_HEIGHT - 1
 		end
@@ -139,16 +143,47 @@ function TIC()
 		wall_x = wall_x - math.floor(wall_x)
 
 		local tex_id = mget(map_x, map_y)
-		local tex_size = TEX_SIZES[tex_id]
-		local tex_x = math.floor(wall_x * tex_size[1])
+		local tex_x = math.floor(wall_x * TEX_WIDTH)
 
-		local step = tex_size[2] / line_height
-		local tex_pos = (draw_start - SCREEN_HEIGHT / 2 + line_height / 2) * step
+		local step = TEX_HEIGHT / line_height
+		local tex_pos = (draw_start - SCREEN_HEIGHT * 0.5 + line_height * 0.5) * step
 
 		for y=draw_start,draw_end do
-			local tex_y = math.floor(tex_pos) % tex_size[2]
+			local tex_y = math.floor(tex_pos) % TEX_HEIGHT
 			pix(x, y, get_tex_pixel(0x8000, tex_id, tex_x, tex_y))
 			tex_pos = tex_pos + step
+		end
+	end
+
+	--floor
+	local ray_dir_x0 = dir_x - plane_x
+	local ray_dir_y0 = dir_y - plane_y
+	local ray_dir_x1 = dir_x + plane_x
+	local ray_dir_y1 = dir_y + plane_y
+	for y=SCREEN_HEIGHT / 2,SCREEN_HEIGHT do
+		local pos_z = SCREEN_HEIGHT * 0.5
+		local p = y - pos_z
+		local row_distance = pos_z / p
+		local floor_step_x = row_distance * (ray_dir_x1 - ray_dir_x0) / SCREEN_WIDTH
+		local floor_step_y = row_distance * (ray_dir_y1 - ray_dir_y0) / SCREEN_WIDTH
+		local floor_x = pos_x + row_distance * ray_dir_x0
+		local floor_y = pos_y + row_distance * ray_dir_y0
+		for x=0,SCREEN_WIDTH do
+			local cell_x = math.floor(floor_x)
+			local cell_y = math.floor(floor_y)
+
+			local tx = math.floor(TEX_WIDTH * (floor_x - cell_x)) % TEX_WIDTH
+			local ty = math.floor(TEX_HEIGHT * (floor_y - cell_y)) % TEX_HEIGHT
+
+			if pix(x, y) == 0 then
+				pix(x, y, get_tex_pixel(0x8000, FLOOR_TEX, tx, ty))
+			end
+			if pix(x, SCREEN_HEIGHT - y - 1) == 0 then
+				pix(x, SCREEN_HEIGHT - y - 1, get_tex_pixel(0x8000, CEIL_TEX, tx, ty))
+			end
+
+			floor_x = floor_x + floor_step_x
+			floor_y = floor_y + floor_step_y
 		end
 	end
 
@@ -158,14 +193,19 @@ function TIC()
 end
 
 -- <TILES>
--- 001:a33333333a33344333a33343333a33333333a33334333a33344333a33333333a
--- 002:1111111612211161121116111111611111161111116111211611122161111111
--- 017:aaaaaaa6abbaaa6aabaaa6aaaaaa6aaaaaa6aaaaaa6aaabaa6aaabba6aaaaaaa
--- 018:a77777777a77766777a77767777a77777777a77776777a77766777a77777777a
+-- 001:33333d3332222d3232222d32dddddddd333d3333222d3222222d3222dddddddd
+-- 002:33d3333d22d3222d22d3222dddddddddd33333d3d32222d3d32222d3dddddddd
+-- 003:dffdeedfedfdeeedeeffdeeeefffddeeefffffdeffffffeefffddffffddeefff
+-- 004:ffeefffddfffffdeedfffdeeeedffddeeefffffeeffffffffffddffffddeedff
+-- 005:444444044444d4043344440444334404444444043444d4044444440400000000
+-- 006:44444444d4333344444444334444444444333444d44443334444444400000000
+-- 017:33333d3332222d3232222d32dddddddd33d3333d22d3222d22d3222ddddddddd
+-- 018:33d3333d22d3222d22d3222ddddddddd33333d3332222d3232222d32dddddddd
+-- 019:deeefffdeeeffddeeeeffdeeeffffdeefffdffdeffdddffffdeeeddfffdeeedf
+-- 020:deeeeffdeeeeffdeeeefffdeeeffdffefffdddffffddeedffdeeefffffdeffee
+-- 021:4444444444433333333444444444444444444333333334444444444400000000
+-- 022:444044444d404d444440444344404444444044444d404d434440444400000000
 -- </TILES>
-
--- <SPRITES>
--- </SPRITES>
 
 -- <MAP>
 -- 000:101010101010101010101010101010101010101010101010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -193,12 +233,6 @@ end
 -- 022:100000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 023:101010101010101010101010101010101010101010101010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- </MAP>
-
--- <WAVES>
--- </WAVES>
-
--- <SFX>
--- </SFX>
 
 -- <PALETTE>
 -- 000:1a1c2c5d275db13e53ef7d57ffcd75a7f07038b76425717929366f3b5dc941a6f673eff7f4f4f494b0c2566c86333c57

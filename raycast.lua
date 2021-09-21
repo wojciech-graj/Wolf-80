@@ -58,6 +58,10 @@ Sprite = {
 	pos_x = 0,
 	pos_y = 0,
 	tex = 0,
+	u_div = 1,
+	v_div = 1,
+	v_move = 0,
+	screen_v_move = 0,
 	dist = 0,
 	rel_x = 0,
 	rel_y = 0,
@@ -74,11 +78,14 @@ Sprite = {
 }
 Sprite.__index = Sprite
 
-function Sprite.new(pos_x, pos_y, tex)
+function Sprite.new(pos_x, pos_y, tex, u_div, v_div, v_move)
 	local self = setmetatable({}, Sprite)
 	self.pos_x = pos_x
 	self.pos_y = pos_y
 	self.tex = tex
+	self.u_div = u_div
+	self.v_div = v_div
+	self.v_move = v_move
 	return self
 end
 
@@ -98,7 +105,7 @@ function Sprite:calculate(inv_det)
 	end
 	self.trans_x = inv_det * (player.dir_y * self.rel_x - player.dir_x * self.rel_y)
 	self.screen_x = math.floor((screen_width * 0.5) * (1 + self.trans_x / self.trans_y))
-	self.screen_width = math.abs(screen_height // self.trans_y)
+	self.screen_width = math.abs(screen_height // self.trans_y) // self.u_div
 	self.draw_start_x = self.screen_x - self.screen_width // 2
 	if self.draw_start_x < 0 then
 		self.draw_start_x = 0
@@ -113,12 +120,13 @@ function Sprite:calculate(inv_det)
 		self.dist = -self.dist
 		return
 	end
-	self.screen_height = math.abs(screen_height // self.trans_y)
-	self.draw_start_y = screen_half_height - self.screen_height // 2
+	self.screen_height = math.abs(screen_height // self.trans_y) // self.v_div
+	self.screen_v_move = self.v_move // self.trans_y
+	self.draw_start_y = screen_half_height - self.screen_height // 2 + self.screen_v_move
 	if self.draw_start_y < 0 then
 		self.draw_start_y = 0
 	end
-	self.draw_end_y = screen_half_height + self.screen_height // 2
+	self.draw_end_y = screen_half_height + self.screen_height // 2 + self.screen_v_move
 	if self.draw_end_y >= screen_height then
 		self.draw_end_y = screen_height - 1
 	end
@@ -132,16 +140,16 @@ function init()
 	g_SCREEN_WIDTH = 240
 	g_SCREEN_HEIGHT = 136
 	g_FPS_COUNTER = true
-	g_TEX_WIDTH = 16
-	g_TEX_HEIGHT = 16
+	g_TEX_WIDTH = 32
+	g_TEX_HEIGHT = 32
 	g_SPRITE_SIZES = {
 		[0]={16,16}
 	}
 	g_player = Player.new(22, 12)
 	g_prev_time = 0
 	g_sprites = {
-		Sprite.new(12, 13, 0),
-		Sprite.new(15, 16, 0),
+		Sprite.new(12, 13, 0, 2, 2, 36),
+		Sprite.new(15, 16, 0, 2, 2, 36),
 	}
 end
 
@@ -264,7 +272,7 @@ function TIC()
 				local a = sprite_sizes[sprite.tex][2] / sprite.screen_height
 				local sprite_tex_x = math.floor((x - (sprite.screen_x - sprite.screen_width / 2)) * sprite_sizes[sprite.tex][1] / sprite.screen_width)
 				for y=sprite.draw_start_y,sprite.draw_end_y do
-					local tex_y = math.floor((y - screen_half_height + sprite.screen_height / 2) * a)
+					local tex_y = math.floor((y - sprite.screen_v_move - screen_half_height + sprite.screen_height / 2) * a)
 					local color = get_tex_pixel(0xC000, sprite.tex, sprite_tex_x, tex_y)
 					if color > 0 and pix(x, y) == 0 then
 						pix(x, y, color)
@@ -302,10 +310,10 @@ function TIC()
 			local ty = math.floor(tex_height * (floor_y - cell_y)) % tex_height
 
 			if pix(x, y) == 0 then
-				pix(x, y, get_tex_pixel(0x8000, 3, tx, ty)) --[CONST]
+				pix(x, y, get_tex_pixel(0x8000, 5, tx, ty)) --[CONST]
 			end
 			if pix(x, screen_height - y - 1) == 0 then
-				pix(x, screen_height - y - 1, get_tex_pixel(0x8000, 5, tx, ty)) --[CONST]
+				pix(x, screen_height - y - 1, get_tex_pixel(0x8000, 9, tx, ty)) --[CONST]
 			end
 
 			floor_x = floor_x + floor_step_x
@@ -314,23 +322,59 @@ function TIC()
 	end
 
 	if g_FPS_COUNTER then
-		print(math.floor(1000 / delta), 0, 0)
+		print(math.floor(1000 / delta), 0, 0, 5)
 	end
 end
 
 -- <TILES>
--- 001:33333d3332222d3232222d32dddddddd333d3333222d3222222d3222dddddddd
--- 002:33d3333d22d3222d22d3222dddddddddd33333d3d32222d3d32222d3dddddddd
--- 003:dffdeedfedfdeeedeeffdeeeefffddeeefffffdeffffffeefffddffffddeefff
--- 004:ffeefffddfffffdeedfffdeeeedffddeeefffffeeffffffffffddffffddeedff
--- 005:444444044444d4043344440444334404444444043444d4044444440400000000
--- 006:44444444d4333344444444334444444444333444d44443334444444400000000
--- 017:33333d3332222d3232222d32dddddddd33d3333d22d3222d22d3222ddddddddd
--- 018:33d3333d22d3222d22d3222ddddddddd33333d3332222d3232222d32dddddddd
--- 019:deeefffdeeeffddeeeeffdeeeffffdeefffdffdeffdddffffdeeeddfffdeeedf
--- 020:deeeeffdeeeeffdeeeefffdeeeffdffefffdddffffddeedffdeeefffffdeffee
--- 021:4444444444433333333444444444444444444333333334444444444400000000
--- 022:444044444d404d444440444344404444444044444d404d434440444400000000
+-- 001:ffffffffd56555d5d567777ed566766e666677ee6e667eeedeee7eeedeeeeeee
+-- 002:ffffffff5555dddfeeee6eefeee56eef555667ef556667ef666767efee6e77ef
+-- 003:ffffffffddddd5dddeeee557dee6e766dee6eee7de76ee7ede777ee7de7e7ee7
+-- 004:ffffffff5ddddddfeeeeeeef6eeeeeef6e66e7ef567666ef6577677f7776777f
+-- 005:443333ee333333e4eeeeeee4444444ee4444444e44c444444ccc444444ccc444
+-- 006:ee3ee4444eee44c44444ccc4444ccc44e4444444eee4444344ee4433444eeeee
+-- 007:4444ee444433e4444433e44c4433e4cc433ee4cc333e444433e44444eeeeee44
+-- 008:4444eee3444444eec4444444c44444434444444344444433444433334443333e
+-- 009:ffffffffffffffffffffffddffffddddfffddddffffddfffffdddfffffddffff
+-- 010:ffffdddddddddddddddddfffffffffffffffffffffffffffffffffffffffffff
+-- 011:ddddffffddddddddfffdddddffffffffffffffffffffffffffffffffffffffff
+-- 012:ffffffffffffffffddffffffddddfffffddddffffffddffffffdddffffffddff
+-- 017:ffffffff567665dfe777e6efe76756efe76777efeee767efeeee67efeeee7eef
+-- 018:ffffffffd5555d55dee6657edeee65e7deee6675deeeee55deeee776deeeee76
+-- 019:ffffffff55d5dddfeeeeeeef7eeeee6f6ee7ee6f67e7e67f6677e77f776ee77f
+-- 020:ffffffffdd555d5dde56e6eede66e6eedee6eeeed66777eed766557ed777777e
+-- 021:4444c44444444444e4444444ee4444334ee4433333eeee333ee44eeeee44444e
+-- 022:444ee444433ee4443333e444333ee44c33ee444c3ee444ccee444444eee44444
+-- 023:44444eee4444444444444444c4444444c4444444444444434444443344444333
+-- 024:e433333eeee333e43eeeee443e4444443e444444e444cc44e44ccc44e44cc444
+-- 025:fddffffffddffffffddffffffddfffffdddfffffddffffffddffffffddffffff
+-- 026:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 027:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 028:fffffddffffffddffffffddffffffddffffffdddffffffddffffffddffffffdd
+-- 033:ffffffffddd5565dd65565ee66566eeed6667ee6d6777eeed67776eede7777ee
+-- 034:ffffffffd5655ddf7667eeef7677eeefe7767eefee76677feee7767feeee777f
+-- 035:ffffffffd5d555dddeeee557deeee776de5ee676d6655ee7d6777eeede77eeee
+-- 036:ffffffff56655ddf65eeeeef76eeeeef7e66eeef667eeeef7767eeef77eeeeef
+-- 037:e44cc444e44c4444ee4444443e4444433ee444333eeee333e4444eee44444444
+-- 038:43ee444433e4e44433e4e44433e4eee4ee4444eee4444444e444c444e4cc4444
+-- 039:4444333e444333ee43333eee33eee444eee44444e4444444e4444444e444cc44
+-- 040:e444444444444443e4444443ee4444334e44433344e4333e444eeee4444443e4
+-- 041:ddffffffddffffffddffffffdddffffffddffffffddffffffddffffffddfffff
+-- 042:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 043:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 044:ffffffddffffffddffffffddfffffdddfffffddffffffddffffffddffffffddf
+-- 049:ffffffff65d55ddfe656eeefee765eefe76557ef5566777f56777e7fe777eeef
+-- 050:ffffffffd5767755dee66eeedee767eedee77eeedee677eedee667eedee777ee
+-- 051:ffffffff65655ddf55667eef65675eefe76676efe776776feeeee77feeeee77f
+-- 052:ffffffffdd55555dde5577eedee656eede6767e7de67777edee67eeedee77777
+-- 053:444444444ccc44444ccc444444c44443444443334444433e4443333e443333e4
+-- 054:e4c444444ecc44433e4444333e444433ee44433ee444333e444433e444433ee4
+-- 055:e44ccc44e44cc444e4444444e44444444ee4444444ee44444443e4444443e433
+-- 056:444443e4444443e4444443e4444433e4443333e4433eee4433ee444433e44444
+-- 057:ffddffffffdddffffffddffffffddddfffffddddffffffddffffffffffffffff
+-- 058:ffffffffffffffffffffffffffffffffffffffffdddddfffddddddddffffdddd
+-- 059:fffffffffffffffffffffffffffffffffffffffffffdddddddddddddddddffff
+-- 060:ffffddfffffdddfffffddffffddddfffddddffffddffffffffffffffffffffff
 -- </TILES>
 
 -- <SPRITES>

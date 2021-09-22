@@ -156,6 +156,8 @@ function init()
 		Sprite.new(12, 13, 0, 2, 2, 36),
 		Sprite.new(15, 16, 0, 2, 2, 36),
 	}
+	g_floor_ceil = true
+	g_interlace = 2 --disabled=g_interlace>=2
 end
 
 init()
@@ -176,6 +178,23 @@ function TIC()
 	local math_floor = math.floor
 	local math_abs = math.abs
 
+	local start_vline
+	local step_vline
+	if g_interlace >= 2 then
+		start_vline = 0
+		step_vline = 1
+		cls(0)
+	else
+		start_vline = (g_interlace + 1) % 2
+		g_interlace = start_vline
+		step_vline = 2
+		for x=start_vline,screen_width-1,step_vline do
+			for y=0,screen_height-1 do
+				pix(x, y, 0)
+			end
+		end
+	end
+
 	-- game logic
 	t = time()
 
@@ -186,8 +205,6 @@ function TIC()
 
 	-- drawing
 	t = t_temp
-
-	cls(0)
 
 	local inv_det = 1 / (player.plane_x * player.dir_y - player.dir_x * player.plane_y)
 	local visible_sprites = {}
@@ -202,7 +219,7 @@ function TIC()
 	local num_visible_sprites = #visible_sprites
 
 	-- draw walls and sprites
-	for x=0,screen_width-1 do
+	for x=start_vline,screen_width-1,step_vline do
 		local camera_x = 2 * x / screen_width - 1
 		local ray_dir_x = player.dir_x + player.plane_x * camera_x
 		local ray_dir_y = player.dir_y + player.plane_y * camera_x
@@ -314,11 +331,11 @@ function TIC()
 			local tex_x = math_floor(wall_x * tex_width)
 
 			local step_tex = tex_height / line_height
-			local tex_start = (draw_start - screen_half_height + line_height * 0.5) * step_tex
+			local testart_vline = (draw_start - screen_half_height + line_height * 0.5) * step_tex
 
 			for y=draw_start,draw_end do
 				if pix(x, y) == 0 then
-					local tex_y = math_floor(tex_start + step_tex * (y - draw_start)) % tex_height
+					local tex_y = math_floor(testart_vline + step_tex * (y - draw_start)) % tex_height
 					pix(x, y, get_tex_pixel(0x8000, tex_id, tex_x, tex_y))
 				end
 			end
@@ -358,32 +375,34 @@ function TIC()
 	t = t_temp
 
 	--draw floor + ceiling
-	local ray_dir_x0 = player.dir_x - player.plane_x
-	local ray_dir_y0 = player.dir_y - player.plane_y
-	local ray_dir_x1 = player.dir_x + player.plane_x
-	local ray_dir_y1 = player.dir_y + player.plane_y
-	for y=screen_half_height,screen_height do
-		local row_distance = screen_half_height / (y - screen_half_height)
-		local floor_step_x = row_distance * (ray_dir_x1 - ray_dir_x0) / screen_width
-		local floor_step_y = row_distance * (ray_dir_y1 - ray_dir_y0) / screen_width
-		local floor_x = player.pos_x + row_distance * ray_dir_x0
-		local floor_y = player.pos_y + row_distance * ray_dir_y0
-		for x=0,screen_width-1 do
-			local tex_x = math_floor(tex_width * floor_x) % tex_width
-			local tex_y = math_floor(tex_height * floor_y) % tex_height
+	if g_floor_ceil then
+		local ray_dir_x0 = player.dir_x - player.plane_x
+		local ray_dir_y0 = player.dir_y - player.plane_y
+		local ray_dir_x1 = player.dir_x + player.plane_x
+		local ray_dir_y1 = player.dir_y + player.plane_y
+		for y=screen_half_height,screen_height do
+			local row_distance = screen_half_height / (y - screen_half_height)
+			local floor_step_x = step_vline * row_distance * (ray_dir_x1 - ray_dir_x0) / screen_width
+			local floor_step_y = step_vline * row_distance * (ray_dir_y1 - ray_dir_y0) / screen_width
+			local floor_x = player.pos_x + row_distance * ray_dir_x0
+			local floor_y = player.pos_y + row_distance * ray_dir_y0
+			for x=start_vline,screen_width-1,step_vline do
+				local tex_x = math_floor(tex_width * floor_x) % tex_width
+				local tex_y = math_floor(tex_height * floor_y) % tex_height
 
-			-- draw floor
-			if pix(x, y) == 0 then
-				pix(x, y, get_tex_pixel(0x8000, 3, tex_x, tex_y)) --[CONST]
+				-- draw floor
+				if pix(x, y) == 0 then
+					pix(x, y, get_tex_pixel(0x8000, 3, tex_x, tex_y)) --[CONST]
+				end
+
+				--draw ceiling
+				if pix(x, screen_height - y - 1) == 0 then
+					pix(x, screen_height - y - 1, get_tex_pixel(0x8000, 5, tex_x, tex_y)) --[CONST]
+				end
+
+				floor_x = floor_x + floor_step_x
+				floor_y = floor_y + floor_step_y
 			end
-
-			--draw ceiling
-			if pix(x, screen_height - y - 1) == 0 then
-				pix(x, screen_height - y - 1, get_tex_pixel(0x8000, 5, tex_x, tex_y)) --[CONST]
-			end
-
-			floor_x = floor_x + floor_step_x
-			floor_y = floor_y + floor_step_y
 		end
 	end
 

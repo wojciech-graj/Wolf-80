@@ -10,7 +10,7 @@ Player = {
 	dir_x = -1,
 	dir_y = 0,
 	plane_x = 0,
-	plane_y = 0.66,
+	plane_y = 0.8,
 }
 Player.__index = Player
 
@@ -63,7 +63,7 @@ Sprite = {
 	tex_id = 0,
 	scl_horiz = 1,
 	scl_vert = 1,
-	offset_vert = 0,
+	offset_vert = 0, --from 0.5 (floor) to -0.5 (ceiling)
 	screen_offset_vert = 0,
 	dist = 0, --Distance to player (negative if not in viewing triangle)
 	screen_x = 0,
@@ -120,12 +120,12 @@ function Sprite:process(inv_det)
 		return
 	end
 	self.screen_height = math_abs(screen_height // trans_y) // self.scl_vert
-	self.screen_offset_vert = self.offset_vert // trans_y
+	self.screen_offset_vert = screen_half_height * self.offset_vert // trans_y
 	self.draw_start_y = screen_half_height - self.screen_height // 2 + self.screen_offset_vert
 	if self.draw_start_y < 0 then
 		self.draw_start_y = 0
 	end
-	self.draw_end_y = screen_half_height + self.screen_height // 2 + self.screen_offset_vert - 1
+	self.draw_end_y = screen_half_height + self.screen_height // 2 + self.screen_offset_vert
 	if self.draw_end_y >= screen_height then
 		self.draw_end_y = screen_height - 1
 	end
@@ -153,8 +153,8 @@ function init()
 	g_player = Player.new(22, 12)
 	g_prev_time = 0
 	g_sprites = {
-		Sprite.new(12, 13, 0, 2, 2, 36),
-		Sprite.new(15, 16, 0, 2, 2, 36),
+		Sprite.new(12, 13, 0, 2, 2, 0.5),
+		Sprite.new(15, 16, 0, 2, 2, 0),
 	}
 	g_floor_ceil = true
 	g_interlace = 2 --disabled=g_interlace>=2
@@ -202,9 +202,9 @@ function TIC()
 
 	local t_temp = time()
 	local t_logic = t_temp - t
+	t = t_temp
 
 	-- drawing
-	t = t_temp
 
 	local inv_det = 1 / (player.plane_x * player.dir_y - player.dir_x * player.plane_y)
 	local visible_sprites = {}

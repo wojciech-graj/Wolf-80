@@ -21,7 +21,7 @@ function Player.new(pos_x, pos_y)
 	return self
 end
 
-function Player:physics_process(delta)
+function Player:process(delta)
 	if btn(2) then
 		self:rotate(delta)
 	elseif btn(3) then
@@ -57,17 +57,12 @@ end
 Sprite = {
 	pos_x = 0,
 	pos_y = 0,
-	tex = 0,
-	u_div = 1,
-	v_div = 1,
-	v_move = 0,
-	screen_v_move = 0,
-	dist = 0,
-	rel_x = 0,
-	rel_y = 0,
-	inv_det = 0,
-	trans_x = 0,
-	trans_y = 0,
+	tex_id = 0,
+	scl_horiz = 1,
+	scl_vert = 1,
+	offset_vert = 0,
+	screen_offset_vert = 0,
+	dist = 0, --Distance to player (negative if not in viewing triangle)
 	screen_x = 0,
 	screen_width = 0,
 	screen_height = 0,
@@ -78,34 +73,34 @@ Sprite = {
 }
 Sprite.__index = Sprite
 
-function Sprite.new(pos_x, pos_y, tex, u_div, v_div, v_move)
+function Sprite.new(pos_x, pos_y, tex, scl_horiz, scl_vert, offset_vert)
 	local self = setmetatable({}, Sprite)
 	self.pos_x = pos_x
 	self.pos_y = pos_y
-	self.tex = tex
-	self.u_div = u_div
-	self.v_div = v_div
-	self.v_move = v_move
+	self.tex_id = tex_id
+	self.scl_horiz = scl_horiz
+	self.scl_vert = scl_vert
+	self.offset_vert = offset_vert
 	return self
 end
 
-function Sprite:calculate(inv_det)
+function Sprite:process(inv_det)
 	local screen_width = g_SCREEN_WIDTH
 	local screen_height = g_SCREEN_HEIGHT
 	local screen_half_height = screen_height / 2
 	local player = g_player
 
-	self.rel_x = self.pos_x - player.pos_x
-	self.rel_y = self.pos_y - player.pos_y
-	self.dist = math.sqrt(self.rel_x * self.rel_x + self.rel_y * self.rel_y)
-	self.trans_y = inv_det * (player.plane_x * self.rel_y - player.plane_y * self.rel_x)
-	if self.trans_y <= 0 then
+	local rel_x = self.pos_x - player.pos_x
+	local rel_y = self.pos_y - player.pos_y
+	self.dist = math.sqrt(rel_x * rel_x + rel_y * rel_y)
+	local trans_y = inv_det * (player.plane_x * rel_y - player.plane_y * rel_x)
+	if trans_y <= 0 then
 		self.dist = -self.dist
 		return
 	end
-	self.trans_x = inv_det * (player.dir_y * self.rel_x - player.dir_x * self.rel_y)
-	self.screen_x = math.floor((screen_width * 0.5) * (1 + self.trans_x / self.trans_y))
-	self.screen_width = math.abs(screen_height // self.trans_y) // self.u_div
+	local trans_x = inv_det * (player.dir_y * rel_x - player.dir_x * rel_y)
+	self.screen_x = math.floor((screen_width * 0.5) * (1 + trans_x / trans_y))
+	self.screen_width = math.abs(screen_height // trans_y) // self.scl_horiz
 	self.draw_start_x = self.screen_x - self.screen_width // 2
 	if self.draw_start_x < 0 then
 		self.draw_start_x = 0
@@ -120,13 +115,13 @@ function Sprite:calculate(inv_det)
 		self.dist = -self.dist
 		return
 	end
-	self.screen_height = math.abs(screen_height // self.trans_y) // self.v_div
-	self.screen_v_move = self.v_move // self.trans_y
-	self.draw_start_y = screen_half_height - self.screen_height // 2 + self.screen_v_move
+	self.screen_height = math.abs(screen_height // trans_y) // self.scl_vert
+	self.screen_offset_vert = self.offset_vert // trans_y
+	self.draw_start_y = screen_half_height - self.screen_height // 2 + self.screen_offset_vert
 	if self.draw_start_y < 0 then
 		self.draw_start_y = 0
 	end
-	self.draw_end_y = screen_half_height + self.screen_height // 2 + self.screen_v_move - 1
+	self.draw_end_y = screen_half_height + self.screen_height // 2 + self.screen_offset_vert - 1
 	if self.draw_end_y >= screen_height then
 		self.draw_end_y = screen_height - 1
 	end
@@ -162,12 +157,12 @@ end
 init()
 function TIC()
 	local t = time()
-	local delta = t - g_prev_time --msec
+	local delta = t - g_prev_time --msec since last frame
 	g_prev_time = t
 
 	local screen_width = g_SCREEN_WIDTH
 	local screen_height = g_SCREEN_HEIGHT
-	local screen_half_height = screen_height / 2
+	local screen_half_height = screen_height // 2
 	local tex_width = g_TEX_WIDTH
 	local tex_height = g_TEX_HEIGHT
 	local sprite_sizes = g_SPRITE_SIZES
@@ -175,15 +170,16 @@ function TIC()
 	local player = g_player
 	local sprites = g_sprites
 
-	player:physics_process(delta)
+	-- game logic
+	player:process(delta)
 
-	-- draw
+	-- drawing
 	cls(0)
 
 	local inv_det = 1 / (player.plane_x * player.dir_y - player.dir_x * player.plane_y)
 	local visible_sprites = {}
 	for key,sprite in pairs(sprites) do
-		sprite:calculate(inv_det)
+		sprite:process(inv_det)
 		if sprite.dist > 0 then
 			visible_sprites[#visible_sprites+1] = sprite
 		end
@@ -192,7 +188,7 @@ function TIC()
 	table.sort(visible_sprites, function(a,b) return a.dist < b.dist end)
 	local num_visible_sprites = #visible_sprites
 
-	-- walls
+	-- draw walls and sprites
 	for x=0,screen_width-1 do
 		local camera_x = 2 * x / screen_width - 1
 		local ray_dir_x = player.dir_x + player.plane_x * camera_x
@@ -226,9 +222,9 @@ function TIC()
 		local not_hit_full_wall = true
 		local prev_draw_start = screen_height
 		while not_hit_full_wall do
+			-- Get next wall tile using DDA
 			local side
 			local tile_data
-			local tile_height
 			local not_hit = true
 			while not_hit do
 				if side_dist_x < side_dist_y then
@@ -246,11 +242,6 @@ function TIC()
 				end
 			end
 
-			tile_height = tile_data // 16 / 16 -- 0=full, 1=no height
-			if tile_height == 0 then
-				not_hit_full_wall = false
-			end
-
 			local perp_wall_dist
 			if side == 0 then
 				perp_wall_dist = (map_x - player.pos_x + (1 - step_x) * 0.5) / ray_dir_x
@@ -258,7 +249,33 @@ function TIC()
 				perp_wall_dist = (map_y - player.pos_y + (1 - step_y) * 0.5) / ray_dir_y
 			end
 
-			local line_height = 136 // perp_wall_dist
+			--draw sprites
+			for sprite_idx=current_sprite,num_visible_sprites do
+				local sprite = visible_sprites[sprite_idx]
+				if sprite.dist >= perp_wall_dist then
+					break
+				end
+				current_sprite = sprite_idx + 1
+				if x >= sprite.draw_start_x and x <= sprite.draw_end_x then
+					local a = sprite_sizes[sprite.tex_id][2] / sprite.screen_height
+					local sprite_tex_x = math.floor((x - (sprite.screen_x - sprite.screen_width / 2)) * sprite_sizes[sprite.tex_id][1] / sprite.screen_width)
+					for y=sprite.draw_start_y,sprite.draw_end_y do
+						local tex_y = math.floor((y - sprite.screen_offset_vert - screen_half_height + sprite.screen_height / 2) * a)
+						local color = get_tex_pixel(0xC000, sprite.tex_id, sprite_tex_x, tex_y)
+						if color > 0 and pix(x, y) == 0 then
+							pix(x, y, color)
+						end
+					end
+				end
+			end
+
+			--draw wall
+			local tile_height = tile_data // 16 / 16 -- 0=full height, 1=no height
+			if tile_height == 0 then
+				not_hit_full_wall = false
+			end
+
+			local line_height = screen_height // perp_wall_dist
 			local draw_start = screen_half_height + math.floor(line_height * (tile_height - 0.5)) + 1
 			if draw_start < 0 then
 				draw_start = 0
@@ -283,54 +300,32 @@ function TIC()
 			local tex_id = tex_map[tile_data % 16]
 			local tex_x = math.floor(wall_x * tex_width)
 
-			local step = tex_height / line_height
-			local tex_start = (draw_start - screen_half_height + line_height * 0.5) * step
-
-			--TODO:optimization
-
-			for sprite_idx=current_sprite,num_visible_sprites do
-				local sprite = visible_sprites[sprite_idx]
-				if sprite.dist >= perp_wall_dist then
-					break
-				end
-				current_sprite = sprite_idx + 1
-				if x >= sprite.draw_start_x and x <= sprite.draw_end_x then
-					local a = sprite_sizes[sprite.tex][2] / sprite.screen_height
-					local sprite_tex_x = math.floor((x - (sprite.screen_x - sprite.screen_width / 2)) * sprite_sizes[sprite.tex][1] / sprite.screen_width)
-					for y=sprite.draw_start_y,sprite.draw_end_y do
-						local tex_y = math.floor((y - sprite.screen_v_move - screen_half_height + sprite.screen_height / 2) * a)
-						local color = get_tex_pixel(0xC000, sprite.tex, sprite_tex_x, tex_y)
-						if color > 0 and pix(x, y) == 0 then
-							pix(x, y, color)
-						end
-					end
-				end
-			end
+			local step_tex = tex_height / line_height
+			local tex_start = (draw_start - screen_half_height + line_height * 0.5) * step_tex
 
 			for y=draw_start,draw_end do
 				if pix(x, y) == 0 then
-					local tex_y = math.floor(tex_start + step * (y - draw_start)) % tex_height
+					local tex_y = math.floor(tex_start + step_tex * (y - draw_start)) % tex_height
 					pix(x, y, get_tex_pixel(0x8000, tex_id, tex_x, tex_y))
 				end
 			end
 
-			--top of half-height walls
-			--probably inefficient but works well enough
+			--draw top of variable-height walls
 			if tile_height > 0.5 then
 				if side_dist_x < side_dist_y then
 					perp_wall_dist = (map_x + step_x - player.pos_x + (1 - step_x) * 0.5) / ray_dir_x
 				else
 					perp_wall_dist = (map_y + step_y - player.pos_y + (1 - step_y) * 0.5) / ray_dir_y
 				end
-				line_height = 136 // perp_wall_dist
+				line_height = screen_height // perp_wall_dist
 				local top_draw_start = screen_half_height + math.floor(line_height * (tile_height - 0.5))
 				if top_draw_start >= screen_height then
 					top_draw_start = screen_height - 1
 				end
-				local multiplier = 2 * tile_height - 1
+				local row_distance_part = (2 * tile_height - 1) * screen_half_height
 				for y=top_draw_start,draw_start - 1 do
 					if pix(x, y) == 0 then
-						local row_distance = multiplier * screen_half_height / (y - screen_half_height)
+						local row_distance = row_distance_part / (y - screen_half_height)
 						local floor_x = player.pos_x + row_distance * ray_dir_x
 						local floor_y = player.pos_y + row_distance * ray_dir_y
 						local tex_x = math.floor(tex_width * (floor_x - math.floor(floor_x))) % tex_width
@@ -345,7 +340,7 @@ function TIC()
 		end
 	end
 
-	--floor + ceiling
+	--draw floor + ceiling
 	local ray_dir_x0 = player.dir_x - player.plane_x
 	local ray_dir_y0 = player.dir_y - player.plane_y
 	local ray_dir_x1 = player.dir_x + player.plane_x
@@ -357,14 +352,17 @@ function TIC()
 		local floor_x = player.pos_x + row_distance * ray_dir_x0
 		local floor_y = player.pos_y + row_distance * ray_dir_y0
 		for x=0,screen_width-1 do
-			local tx = math.floor(tex_width * (floor_x - math.floor(floor_x))) % tex_width
-			local ty = math.floor(tex_height * (floor_y - math.floor(floor_y))) % tex_height
+			local tex_x = math.floor(tex_width * (floor_x - math.floor(floor_x))) % tex_width
+			local tex_y = math.floor(tex_height * (floor_y - math.floor(floor_y))) % tex_height
 
+			-- draw floor
 			if pix(x, y) == 0 then
-				pix(x, y, get_tex_pixel(0x8000, 3, tx, ty)) --[CONST]
+				pix(x, y, get_tex_pixel(0x8000, 3, tex_x, tex_y)) --[CONST]
 			end
+
+			--draw ceiling
 			if pix(x, screen_height - y - 1) == 0 then
-				pix(x, screen_height - y - 1, get_tex_pixel(0x8000, 5, tx, ty)) --[CONST]
+				pix(x, screen_height - y - 1, get_tex_pixel(0x8000, 5, tex_x, tex_y)) --[CONST]
 			end
 
 			floor_x = floor_x + floor_step_x
@@ -642,11 +640,11 @@ end
 -- 003:100000000000000000000000000000001010001010001010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 004:100000000000000000000000000000001000000010001010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 005:1000001d1d1d1d1d1d1d0000000000001000000010001010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
--- 006:1000001d1a1a1a1a1a1d0000000000001000100010001010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
--- 007:1000001d1a1616161a1d0000000000001000000010001010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
--- 008:1000001d1a1640161a1d0000000000001010101010001010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
--- 009:1000001d1a1616161a1d0000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
--- 010:1000001d1a1a1a1a1a1d0000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+-- 006:1000001d4a4a4a4a4a1d0000000000001000100010001010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+-- 007:1000001d4a1616164a1d0000000000001000000010001010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+-- 008:1000001d4a1640164a1d0000000000001010101010001010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+-- 009:1000001d4a1616164a1d0000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+-- 010:1000001d4a4a4a4a4a1d0000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 011:1000001d1d1d1d1d1d1d0000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 012:100000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 013:100000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -665,4 +663,3 @@ end
 -- <PALETTE>
 -- 000:1a1c2c5d275db13e53ef7d57ffcd75a7f07038b76425717929366f3b5dc941a6f673eff7f4f4f494b0c2566c86333c57
 -- </PALETTE>
-

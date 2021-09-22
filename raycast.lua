@@ -37,19 +37,22 @@ end
 function Player:rotate(delta)
 	local speed = 0.001 * delta --[CONST]
 	local old_dir_x = self.dir_x
-	self.dir_x = self.dir_x * math.cos(speed) - self.dir_y * math.sin(speed)
-	self.dir_y = old_dir_x * math.sin(speed) + self.dir_y * math.cos(speed)
+	local math_cos = math.cos
+	local math_sin = math.sin
+	self.dir_x = self.dir_x * math_cos(speed) - self.dir_y * math_sin(speed)
+	self.dir_y = old_dir_x * math_sin(speed) + self.dir_y * math_cos(speed)
 	local old_plane_x = self.plane_x
-	self.plane_x = self.plane_x * math.cos(speed) - self.plane_y * math.sin(speed)
-	self.plane_y = old_plane_x * math.sin(speed) + self.plane_y * math.cos(speed)
+	self.plane_x = self.plane_x * math_cos(speed) - self.plane_y * math_sin(speed)
+	self.plane_y = old_plane_x * math_sin(speed) + self.plane_y * math_cos(speed)
 end
 
 function Player:move(delta)
 	local speed = 0.003 * delta --[CONST]
-	if mget(math.floor(self.pos_x + self.dir_x * speed), math.floor(self.pos_y)) == 0 then
+	local math_floor = math.floor
+	if mget(math_floor(self.pos_x + self.dir_x * speed), math_floor(self.pos_y)) == 0 then
 		self.pos_x = self.pos_x + self.dir_x * speed
 	end
-	if mget(math.floor(self.pos_x), math.floor(self.pos_y + self.dir_y * speed)) == 0 then
+	if mget(math_floor(self.pos_x), math_floor(self.pos_y + self.dir_y * speed)) == 0 then
 		self.pos_y = self.pos_y + self.dir_y * speed
 	end
 end
@@ -89,6 +92,7 @@ function Sprite:process(inv_det)
 	local screen_height = g_SCREEN_HEIGHT
 	local screen_half_height = screen_height / 2
 	local player = g_player
+	local math_abs = math.abs
 
 	local rel_x = self.pos_x - player.pos_x
 	local rel_y = self.pos_y - player.pos_y
@@ -100,7 +104,7 @@ function Sprite:process(inv_det)
 	end
 	local trans_x = inv_det * (player.dir_y * rel_x - player.dir_x * rel_y)
 	self.screen_x = math.floor((screen_width * 0.5) * (1 + trans_x / trans_y))
-	self.screen_width = math.abs(screen_height // trans_y) // self.scl_horiz
+	self.screen_width = math_abs(screen_height // trans_y) // self.scl_horiz
 	self.draw_start_x = self.screen_x - self.screen_width // 2
 	if self.draw_start_x < 0 then
 		self.draw_start_x = 0
@@ -115,7 +119,7 @@ function Sprite:process(inv_det)
 		self.dist = -self.dist
 		return
 	end
-	self.screen_height = math.abs(screen_height // trans_y) // self.scl_vert
+	self.screen_height = math_abs(screen_height // trans_y) // self.scl_vert
 	self.screen_offset_vert = self.offset_vert // trans_y
 	self.draw_start_y = screen_half_height - self.screen_height // 2 + self.screen_offset_vert
 	if self.draw_start_y < 0 then
@@ -134,7 +138,7 @@ end
 function init()
 	g_SCREEN_WIDTH = 240
 	g_SCREEN_HEIGHT = 136
-	g_FPS_COUNTER = true
+	g_DEBUG = true
 	g_TEX_WIDTH = 16
 	g_TEX_HEIGHT = 16
 	g_SPRITE_SIZES = {
@@ -169,11 +173,20 @@ function TIC()
 	local tex_map = g_TEX_MAP
 	local player = g_player
 	local sprites = g_sprites
+	local math_floor = math.floor
+	local math_abs = math.abs
 
 	-- game logic
+	t = time()
+
 	player:process(delta)
 
+	local t_temp = time()
+	local t_logic = t_temp - t
+
 	-- drawing
+	t = t_temp
+
 	cls(0)
 
 	local inv_det = 1 / (player.plane_x * player.dir_y - player.dir_x * player.plane_y)
@@ -193,10 +206,10 @@ function TIC()
 		local camera_x = 2 * x / screen_width - 1
 		local ray_dir_x = player.dir_x + player.plane_x * camera_x
 		local ray_dir_y = player.dir_y + player.plane_y * camera_x
-		local map_x = math.floor(player.pos_x)
-		local map_y = math.floor(player.pos_y)
-		local delta_dist_x = math.abs(1 / ray_dir_x)
-		local delta_dist_y = math.abs(1 / ray_dir_y)
+		local map_x = math_floor(player.pos_x)
+		local map_y = math_floor(player.pos_y)
+		local delta_dist_x = math_abs(1 / ray_dir_x)
+		local delta_dist_y = math_abs(1 / ray_dir_y)
 
 		local step_x
 		local side_dist_x
@@ -258,9 +271,9 @@ function TIC()
 				current_sprite = sprite_idx + 1
 				if x >= sprite.draw_start_x and x <= sprite.draw_end_x then
 					local a = sprite_sizes[sprite.tex_id][2] / sprite.screen_height
-					local sprite_tex_x = math.floor((x - (sprite.screen_x - sprite.screen_width / 2)) * sprite_sizes[sprite.tex_id][1] / sprite.screen_width)
+					local sprite_tex_x = math_floor((x - (sprite.screen_x - sprite.screen_width / 2)) * sprite_sizes[sprite.tex_id][1] / sprite.screen_width)
 					for y=sprite.draw_start_y,sprite.draw_end_y do
-						local tex_y = math.floor((y - sprite.screen_offset_vert - screen_half_height + sprite.screen_height / 2) * a)
+						local tex_y = math_floor((y - sprite.screen_offset_vert - screen_half_height + sprite.screen_height / 2) * a)
 						local color = get_tex_pixel(0xC000, sprite.tex_id, sprite_tex_x, tex_y)
 						if color > 0 and pix(x, y) == 0 then
 							pix(x, y, color)
@@ -276,7 +289,7 @@ function TIC()
 			end
 
 			local line_height = screen_height // perp_wall_dist
-			local draw_start = screen_half_height + math.floor(line_height * (tile_height - 0.5)) + 1
+			local draw_start = screen_half_height + math_floor(line_height * (tile_height - 0.5)) + 1
 			if draw_start < 0 then
 				draw_start = 0
 			elseif draw_start >= screen_height then
@@ -295,17 +308,17 @@ function TIC()
 			else
 				wall_x = player.pos_x + perp_wall_dist * ray_dir_x
 			end
-			wall_x = wall_x - math.floor(wall_x)
+			wall_x = wall_x - math_floor(wall_x)
 
 			local tex_id = tex_map[tile_data % 16]
-			local tex_x = math.floor(wall_x * tex_width)
+			local tex_x = math_floor(wall_x * tex_width)
 
 			local step_tex = tex_height / line_height
 			local tex_start = (draw_start - screen_half_height + line_height * 0.5) * step_tex
 
 			for y=draw_start,draw_end do
 				if pix(x, y) == 0 then
-					local tex_y = math.floor(tex_start + step_tex * (y - draw_start)) % tex_height
+					local tex_y = math_floor(tex_start + step_tex * (y - draw_start)) % tex_height
 					pix(x, y, get_tex_pixel(0x8000, tex_id, tex_x, tex_y))
 				end
 			end
@@ -318,7 +331,7 @@ function TIC()
 					perp_wall_dist = (map_y + step_y - player.pos_y + (1 - step_y) * 0.5) / ray_dir_y
 				end
 				line_height = screen_height // perp_wall_dist
-				local top_draw_start = screen_half_height + math.floor(line_height * (tile_height - 0.5))
+				local top_draw_start = screen_half_height + math_floor(line_height * (tile_height - 0.5))
 				if top_draw_start >= screen_height then
 					top_draw_start = screen_height - 1
 				end
@@ -328,8 +341,8 @@ function TIC()
 						local row_distance = row_distance_part / (y - screen_half_height)
 						local floor_x = player.pos_x + row_distance * ray_dir_x
 						local floor_y = player.pos_y + row_distance * ray_dir_y
-						local tex_x = math.floor(tex_width * (floor_x - math.floor(floor_x))) % tex_width
-						local tex_y = math.floor(tex_height * (floor_y - math.floor(floor_y))) % tex_height
+						local tex_x = math_floor(tex_width * floor_x) % tex_width
+						local tex_y = math_floor(tex_height * floor_y) % tex_height
 						pix(x, y, get_tex_pixel(0x8000, tex_id, tex_x, tex_y))
 					end
 				end
@@ -339,6 +352,10 @@ function TIC()
 			end
 		end
 	end
+
+	t_temp = time()
+	local t_wall_sprite = t_temp - t
+	t = t_temp
 
 	--draw floor + ceiling
 	local ray_dir_x0 = player.dir_x - player.plane_x
@@ -352,8 +369,8 @@ function TIC()
 		local floor_x = player.pos_x + row_distance * ray_dir_x0
 		local floor_y = player.pos_y + row_distance * ray_dir_y0
 		for x=0,screen_width-1 do
-			local tex_x = math.floor(tex_width * (floor_x - math.floor(floor_x))) % tex_width
-			local tex_y = math.floor(tex_height * (floor_y - math.floor(floor_y))) % tex_height
+			local tex_x = math_floor(tex_width * floor_x) % tex_width
+			local tex_y = math_floor(tex_height * floor_y) % tex_height
 
 			-- draw floor
 			if pix(x, y) == 0 then
@@ -370,8 +387,12 @@ function TIC()
 		end
 	end
 
-	if g_FPS_COUNTER then
-		print(math.floor(1000 / delta), 0, 0, 5)
+	t_temp = time()
+	local t_floor = t_temp - t
+
+	if g_DEBUG then
+		print(string.format("FPS %d\n#SPR %d\nLOGIC %.1f\nWALL&SPR %.1f\nFLR&CEIL %.1f",
+			math_floor(1000 / delta), num_visible_sprites, t_logic, t_wall_sprite, t_floor), 0, 0, 5)
 	end
 end
 

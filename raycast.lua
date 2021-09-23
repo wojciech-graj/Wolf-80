@@ -4,20 +4,61 @@
 -- script: lua
 -- input: gamepad
 
-Player = {
+Entity = {
 	pos_x = 0,
 	pos_y = 0,
 	dir_x = -1,
 	dir_y = 0,
 	plane_x = 0,
 	plane_y = 0.8,
+	speed_rot = 0,
+	speed_move = 0,
+}
+Entity.__index = Entity
+
+function Entity.new(pos_x, pos_y, speed_rot, speed_move)
+	local self = setmetatable({}, Entity)
+	self.pos_x = pos_x
+	self.pos_y = pos_y
+	self.speed_rot = speed_rot
+	self.speed_move = speed_move
+	return self
+end
+
+function Entity:rotate(delta)
+	local speed = self.speed_rot * delta
+	local old_dir_x = self.dir_x
+	local math_cos = math.cos
+	local math_sin = math.sin
+	self.dir_x = self.dir_x * math_cos(speed) - self.dir_y * math_sin(speed)
+	self.dir_y = old_dir_x * math_sin(speed) + self.dir_y * math_cos(speed)
+	local old_plane_x = self.plane_x
+	self.plane_x = self.plane_x * math_cos(speed) - self.plane_y * math_sin(speed)
+	self.plane_y = old_plane_x * math_sin(speed) + self.plane_y * math_cos(speed)
+end
+
+function Entity:move(delta)
+	local speed = self.speed_move * delta
+	local math_floor = math.floor
+	if mget(math_floor(self.pos_x + self.dir_x * speed), math_floor(self.pos_y)) == 0 then
+		self.pos_x = self.pos_x + self.dir_x * speed
+	end
+	if mget(math_floor(self.pos_x), math_floor(self.pos_y + self.dir_y * speed)) == 0 then
+		self.pos_y = self.pos_y + self.dir_y * speed
+	end
+end
+
+Player = {
 }
 Player.__index = Player
+setmetatable(Player, Entity)
 
-function Player.new(pos_x, pos_y)
+function Player.new(pos_x, pos_y, speed_rot, speed_move)
 	local self = setmetatable({}, Player)
 	self.pos_x = pos_x
 	self.pos_y = pos_y
+	self.speed_rot = speed_rot
+	self.speed_move = speed_move
 	return self
 end
 
@@ -34,29 +75,6 @@ function Player:process(delta)
 	end
 end
 
-function Player:rotate(delta)
-	local speed = 0.001 * delta --[CONST]
-	local old_dir_x = self.dir_x
-	local math_cos = math.cos
-	local math_sin = math.sin
-	self.dir_x = self.dir_x * math_cos(speed) - self.dir_y * math_sin(speed)
-	self.dir_y = old_dir_x * math_sin(speed) + self.dir_y * math_cos(speed)
-	local old_plane_x = self.plane_x
-	self.plane_x = self.plane_x * math_cos(speed) - self.plane_y * math_sin(speed)
-	self.plane_y = old_plane_x * math_sin(speed) + self.plane_y * math_cos(speed)
-end
-
-function Player:move(delta)
-	local speed = 0.003 * delta --[CONST]
-	local math_floor = math.floor
-	if mget(math_floor(self.pos_x + self.dir_x * speed), math_floor(self.pos_y)) == 0 then
-		self.pos_x = self.pos_x + self.dir_x * speed
-	end
-	if mget(math_floor(self.pos_x), math_floor(self.pos_y + self.dir_y * speed)) == 0 then
-		self.pos_y = self.pos_y + self.dir_y * speed
-	end
-end
-
 Sprite = {
 	pos_x = 0,
 	pos_y = 0,
@@ -67,8 +85,8 @@ Sprite = {
 	screen_offset_vert = 0,
 	dist = 0, --Distance to player (negative if not in viewing triangle)
 	screen_x = 0,
-	screen_width = 0,
-	screen_height = 0,
+	SCREEN_WIDTH = 0,
+	SCREEN_HEIGHT = 0,
 	draw_start_y = 0,
 	draw_end_y = 0,
 	draw_start_x = 0,
@@ -88,9 +106,9 @@ function Sprite.new(pos_x, pos_y, tex_id, scl_horiz, scl_vert, offset_vert)
 end
 
 function Sprite:process(inv_det)
-	local screen_width = g_SCREEN_WIDTH
-	local screen_height = g_SCREEN_HEIGHT
-	local screen_half_height = screen_height / 2
+	local SCREEN_WIDTH = g_SCREEN_WIDTH
+	local SCREEN_HEIGHT = g_SCREEN_HEIGHT
+	local SCREEN_HALF_HEIGHT = SCREEN_HEIGHT / 2
 	local player = g_player
 	local math_abs = math.abs
 
@@ -103,31 +121,31 @@ function Sprite:process(inv_det)
 		return
 	end
 	local trans_x = inv_det * (player.dir_y * rel_x - player.dir_x * rel_y)
-	self.screen_x = math.floor((screen_width * 0.5) * (1 + trans_x / trans_y))
-	self.screen_width = math_abs(screen_height // trans_y) // self.scl_horiz
-	self.draw_start_x = self.screen_x - self.screen_width // 2
+	self.screen_x = math.floor((SCREEN_WIDTH * 0.5) * (1 + trans_x / trans_y))
+	self.SCREEN_WIDTH = math_abs(SCREEN_HEIGHT // trans_y) // self.scl_horiz
+	self.draw_start_x = self.screen_x - self.SCREEN_WIDTH // 2
 	if self.draw_start_x < 0 then
 		self.draw_start_x = 0
-	elseif self.draw_start_x >= screen_width then
+	elseif self.draw_start_x >= SCREEN_WIDTH then
 		self.dist = -self.dist
 		return
 	end
-	self.draw_end_x = self.screen_x + self.screen_width // 2
-	if self.draw_end_x >= screen_width then
-		self.draw_end_x = screen_width - 1
+	self.draw_end_x = self.screen_x + self.SCREEN_WIDTH // 2
+	if self.draw_end_x >= SCREEN_WIDTH then
+		self.draw_end_x = SCREEN_WIDTH - 1
 	elseif self.draw_end_x < 0 then
 		self.dist = -self.dist
 		return
 	end
-	self.screen_height = math_abs(screen_height // trans_y) // self.scl_vert
-	self.screen_offset_vert = screen_half_height * self.offset_vert // trans_y
-	self.draw_start_y = screen_half_height - self.screen_height // 2 + self.screen_offset_vert
+	self.SCREEN_HEIGHT = math_abs(SCREEN_HEIGHT // trans_y) // self.scl_vert
+	self.screen_offset_vert = SCREEN_HALF_HEIGHT * self.offset_vert // trans_y
+	self.draw_start_y = SCREEN_HALF_HEIGHT - self.SCREEN_HEIGHT // 2 + self.screen_offset_vert
 	if self.draw_start_y < 0 then
 		self.draw_start_y = 0
 	end
-	self.draw_end_y = screen_half_height + self.screen_height // 2 + self.screen_offset_vert
-	if self.draw_end_y >= screen_height then
-		self.draw_end_y = screen_height - 1
+	self.draw_end_y = SCREEN_HALF_HEIGHT + self.SCREEN_HEIGHT // 2 + self.screen_offset_vert
+	if self.draw_end_y >= SCREEN_HEIGHT then
+		self.draw_end_y = SCREEN_HEIGHT - 1
 	end
 end
 
@@ -152,7 +170,7 @@ function init()
 		[4]=7,
 		[5]=9,
 	}
-	g_player = Player.new(22, 12)
+	g_player = Player.new(22, 12, 0.001, 0.003)
 	g_prev_time = 0
 	g_sprites = {
 		Sprite.new(12, 13, 0, 2, 2, 0.5),
@@ -172,13 +190,13 @@ function TIC()
 	local delta = t - g_prev_time --msec since last frame
 	g_prev_time = t
 
-	local screen_width = g_SCREEN_WIDTH
-	local screen_height = g_SCREEN_HEIGHT
-	local screen_half_height = screen_height // 2
-	local tex_width = g_TEX_WIDTH
-	local tex_height = g_TEX_HEIGHT
-	local sprite_sizes = g_SPRITE_SIZES
-	local tex_map = g_TEX_MAP
+	local SCREEN_WIDTH = g_SCREEN_WIDTH
+	local SCREEN_HEIGHT = g_SCREEN_HEIGHT
+	local SCREEN_HALF_HEIGHT = SCREEN_HEIGHT // 2
+	local TEX_WIDTH = g_TEX_WIDTH
+	local TEX_HEIGHT = g_TEX_HEIGHT
+	local SPRITE_SIZES = g_SPRITE_SIZES
+	local TEX_MAP = g_TEX_MAP
 	local player = g_player
 	local sprites = g_sprites
 	local settings = g_settings
@@ -195,8 +213,8 @@ function TIC()
 		start_vline = (settings.interlace + 1) % 2
 		settings.interlace = start_vline
 		step_vline = 2
-		for x=start_vline,screen_width-1,step_vline do
-			for y=0,screen_height-1 do
+		for x=start_vline,SCREEN_WIDTH-1,step_vline do
+			for y=0,SCREEN_HEIGHT-1 do
 				pix(x, y, 0)
 			end
 		end
@@ -237,8 +255,8 @@ function TIC()
 	local num_visible_sprites = #visible_sprites
 
 	-- draw walls and sprites
-	for x=start_vline,screen_width-1,step_vline do
-		local camera_x = 2 * x / screen_width - 1
+	for x=start_vline,SCREEN_WIDTH-1,step_vline do
+		local camera_x = 2 * x / SCREEN_WIDTH - 1
 		local ray_dir_x = player.dir_x + player.plane_x * camera_x
 		local ray_dir_y = player.dir_y + player.plane_y * camera_x
 		local map_x = math_floor(player.pos_x)
@@ -268,13 +286,12 @@ function TIC()
 
 		local current_sprite = 1
 		local not_hit_full_wall = true
-		local prev_draw_start = screen_height
+		local prev_draw_start = SCREEN_HEIGHT
 		while not_hit_full_wall do
 			-- Get next wall tile using DDA
 			local side
 			local tile_data
-			local not_hit = true
-			while not_hit do
+			while true do
 				if side_dist_x < side_dist_y then
 					side_dist_x = side_dist_x + delta_dist_x
 					map_x = map_x + step_x
@@ -286,7 +303,7 @@ function TIC()
 				end
 				tile_data = mget(map_x, map_y)
 				if tile_data > 0 then
-					not_hit = false
+					break
 				end
 			end
 
@@ -305,11 +322,11 @@ function TIC()
 				end
 				current_sprite = sprite_idx + 1
 				if x >= sprite.draw_start_x and x <= sprite.draw_end_x then
-					local sprite_size = sprite_sizes[sprite.tex_id]
-					local a = sprite_size[2] / sprite.screen_height
-					local sprite_tex_x = math_floor((x - (sprite.screen_x - sprite.screen_width / 2)) * sprite_size[1] / sprite.screen_width) % sprite_size[1]
+					local sprite_size = SPRITE_SIZES[sprite.tex_id]
+					local a = sprite_size[2] / sprite.SCREEN_HEIGHT
+					local sprite_tex_x = math_floor((x - (sprite.screen_x - sprite.SCREEN_WIDTH / 2)) * sprite_size[1] / sprite.SCREEN_WIDTH) % sprite_size[1]
 					for y=sprite.draw_start_y,sprite.draw_end_y do
-						local tex_y = math_floor((y - sprite.screen_offset_vert - screen_half_height + sprite.screen_height / 2) * a) % sprite_size[2]
+						local tex_y = math_floor((y - sprite.screen_offset_vert - SCREEN_HALF_HEIGHT + sprite.SCREEN_HEIGHT / 2) * a) % sprite_size[2]
 						local color = get_tex_pixel(0xC000, sprite.tex_id, sprite_tex_x, tex_y)
 						if color > 0 and pix(x, y) == 0 then
 							pix(x, y, color)
@@ -324,18 +341,18 @@ function TIC()
 				not_hit_full_wall = false
 			end
 
-			local line_height = screen_height // perp_wall_dist
-			local draw_start = screen_half_height + math_floor(line_height * (tile_height - 0.5)) + 1
+			local line_height = SCREEN_HEIGHT // perp_wall_dist
+			local draw_start = SCREEN_HALF_HEIGHT + math_floor(line_height * (tile_height - 0.5)) + 1
 			if draw_start < 0 then
 				draw_start = 0
-			elseif draw_start >= screen_height then
-				draw_start = screen_height - 1
+			elseif draw_start >= SCREEN_HEIGHT then
+				draw_start = SCREEN_HEIGHT - 1
 			end
-			local draw_end = screen_half_height + line_height // 2 - 1
+			local draw_end = SCREEN_HALF_HEIGHT + line_height // 2 - 1
 			if draw_end > prev_draw_start then
 				draw_end = prev_draw_start
-			elseif draw_end >= screen_height then
-				draw_end = screen_height - 1
+			elseif draw_end >= SCREEN_HEIGHT then
+				draw_end = SCREEN_HEIGHT - 1
 			end
 
 			local wall_x
@@ -346,15 +363,15 @@ function TIC()
 			end
 			wall_x = wall_x - math_floor(wall_x)
 
-			local tex_id = tex_map[tile_data % 16]
-			local tex_x = math_floor(wall_x * tex_width)
+			local tex_id = TEX_MAP[tile_data % 16]
+			local tex_x = math_floor(wall_x * TEX_WIDTH)
 
-			local step_tex = tex_height / line_height
-			local testart_vline = (draw_start - screen_half_height + line_height * 0.5) * step_tex
+			local step_tex = TEX_HEIGHT / line_height
+			local testart_vline = (draw_start - SCREEN_HALF_HEIGHT + line_height * 0.5) * step_tex
 
 			for y=draw_start,draw_end do
 				if pix(x, y) == 0 then
-					local tex_y = math_floor(testart_vline + step_tex * (y - draw_start)) % tex_height
+					local tex_y = math_floor(testart_vline + step_tex * (y - draw_start)) % TEX_HEIGHT
 					pix(x, y, get_tex_pixel(0x8000, tex_id, tex_x, tex_y))
 				end
 			end
@@ -366,19 +383,19 @@ function TIC()
 				else
 					perp_wall_dist = (map_y + step_y - player.pos_y + (1 - step_y) * 0.5) / ray_dir_y
 				end
-				line_height = screen_height // perp_wall_dist
-				local top_draw_start = screen_half_height + math_floor(line_height * (tile_height - 0.5))
-				if top_draw_start >= screen_height then
-					top_draw_start = screen_height - 1
+				line_height = SCREEN_HEIGHT // perp_wall_dist
+				local top_draw_start = SCREEN_HALF_HEIGHT + math_floor(line_height * (tile_height - 0.5))
+				if top_draw_start >= SCREEN_HEIGHT then
+					top_draw_start = SCREEN_HEIGHT - 1
 				end
-				local row_distance_part = (2 * tile_height - 1) * screen_half_height
+				local row_distance_part = (2 * tile_height - 1) * SCREEN_HALF_HEIGHT
 				for y=top_draw_start,draw_start - 1 do
 					if pix(x, y) == 0 then
-						local row_distance = row_distance_part / (y - screen_half_height)
+						local row_distance = row_distance_part / (y - SCREEN_HALF_HEIGHT)
 						local floor_x = player.pos_x + row_distance * ray_dir_x
 						local floor_y = player.pos_y + row_distance * ray_dir_y
-						local tex_x = math_floor(tex_width * floor_x) % tex_width
-						local tex_y = math_floor(tex_height * floor_y) % tex_height
+						local tex_x = math_floor(TEX_WIDTH * floor_x) % TEX_WIDTH
+						local tex_y = math_floor(TEX_HEIGHT * floor_y) % TEX_HEIGHT
 						pix(x, y, get_tex_pixel(0x8000, tex_id, tex_x, tex_y))
 					end
 				end
@@ -399,26 +416,26 @@ function TIC()
 		local ray_dir_y0 = player.dir_y - player.plane_y
 		local ray_dir_x1 = player.dir_x + player.plane_x
 		local ray_dir_y1 = player.dir_y + player.plane_y
-		for y=screen_half_height,screen_height do
-			local row_distance = screen_half_height / (y - screen_half_height)
-			local floor_step_x = row_distance * (ray_dir_x1 - ray_dir_x0) / screen_width
-			local floor_step_y = row_distance * (ray_dir_y1 - ray_dir_y0) / screen_width
+		for y=SCREEN_HALF_HEIGHT,SCREEN_HEIGHT do
+			local row_distance = SCREEN_HALF_HEIGHT / (y - SCREEN_HALF_HEIGHT)
+			local floor_step_x = row_distance * (ray_dir_x1 - ray_dir_x0) / SCREEN_WIDTH
+			local floor_step_y = row_distance * (ray_dir_y1 - ray_dir_y0) / SCREEN_WIDTH
 			local floor_x = player.pos_x + row_distance * ray_dir_x0 + start_vline * floor_step_x
 			local floor_y = player.pos_y + row_distance * ray_dir_y0 + start_vline * floor_step_y
 			floor_step_x = floor_step_x * step_vline
 			floor_step_y = floor_step_y * step_vline
-			for x=start_vline,screen_width-1,step_vline do
-				local tex_x = math_floor(tex_width * floor_x) % tex_width
-				local tex_y = math_floor(tex_height * floor_y) % tex_height
+			for x=start_vline,SCREEN_WIDTH-1,step_vline do
+				local tex_x = math_floor(TEX_WIDTH * floor_x) % TEX_WIDTH
+				local tex_y = math_floor(TEX_HEIGHT * floor_y) % TEX_HEIGHT
 
-				-- draw floor
+				--draw floor
 				if pix(x, y) == 0 then
 					pix(x, y, get_tex_pixel(0x8000, 3, tex_x, tex_y)) --[CONST]
 				end
 
 				--draw ceiling
-				if pix(x, screen_height - y - 1) == 0 then
-					pix(x, screen_height - y - 1, get_tex_pixel(0x8000, 5, tex_x, tex_y)) --[CONST]
+				if pix(x, SCREEN_HEIGHT - y - 1) == 0 then
+					pix(x, SCREEN_HEIGHT - y - 1, get_tex_pixel(0x8000, 5, tex_x, tex_y)) --[CONST]
 				end
 
 				floor_x = floor_x + floor_step_x
@@ -726,6 +743,145 @@ end
 -- 022:100000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 023:101010101010101010101010101010101010101010101010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- </MAP>
+
+-- <SCREEN>
+-- 000:eeeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeeeeeeeeeeeeeeffffffffffffeeffffffffffffffffffffffffffffffffffffeeeeefffffffeeeeeeeeeeeeeeeeeeeeeeeeeffffffffffffffffffffffffffff
+-- 001:eeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeeeeeeeeeeeeeffffffffeeeeeefffffffffffffffffffffffffffffffeeeeeeeeeeffeeeeeeeeeeeeeeeeeeeeeeeeefffffffffffffffffffffffffffffff
+-- 002:eeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeeeeeeeeeeeeefffeeeeeeeeeeffffffffffffffffffffffffffeeeeeeeeeeeeffeeeeeeeeeeeeeeeeeeeeeefffffffffffffffffffffffffffffffffff
+-- 003:eeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeeeeeeeeeeefeeeeeeeeeeeeefffffffffeeeeefffffffeeeeeeeeeeeefffffffeeeeeeeeeeeeeeeeeffffffffffffffffffffffffffffffffffffff
+-- 004:eeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeeeeefffffffeeeeeeeeeeeeeffffeeeeeeeeeffeeeeeeeeeeeeffffffffffffeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffff
+-- 005:eeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeefffffffffffeeeeeeeeeeeefeeeeeeeeeeeffeeeeeeeeeffffffffffffffffeeeeeeefffffffffffffffffffffffffffffffffffffffffffff
+-- 006:eeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeefffffffffffffffeeeeeeeffffffeeeeeefffffffeeeefffffffffffffffffffffeeffffffffffffffffffffffffffffffffffffffffffffffff
+-- 007:eeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeffffffffffffffffffffeeffffffffffefffffffffffffffffffffffffffffffffeeefffffffffffffffffffffffffffffffffffffffffffffffff
+-- 008:eeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffff
+-- 009:ffffeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffff
+-- 010:ffffffffeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 011:ffffffffeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 012:ffffffffeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 013:ffffffffeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 014:fffffffeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffffffffffffffffffffffffffffffffffffffffffffffeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 015:fffffffffffeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeefffffffffffffffffffffffffffffffffffffffffffeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 016:ffffffffffffffffefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeefffffffffffffffffffffffffffffffffffffffffffffeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 017:fffffffffffffffeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeffffffffffffffffffffffffffffffffffffffffffffffeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 018:fffffffffffffffffeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeefffffffffffffffffffffffffffffffffffffffffeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 019:fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeefffffffffffffffffffffffffffffffffffffffffeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 020:ffffffffffffffffffffffeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 021:ffffffffffffffffffffffffeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 022:ffffffffffffffffffffffffffffffeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeefffffffffffffffeeefffffeeeeffffeeeeeefffffffffffeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 023:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeffffffffeeeeeeeeffeeeeeeeffeeeeeeeeefffffeeeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 024:fffeeefffffeeeeffffeeeeefffffffffffeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeefeeeeeeeefffffffffffffffffeeeeeeeffeeeeeeeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 025:fffeeeeeeefffeeeeefffeeeeeeeeeffffeeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeffffffeefffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffeee
+-- 026:eeeeeeeeeefffffffffffffffffeeeeeefffeeeeeeeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffeeeeeeeee
+-- 027:eeffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeefffffeeefffffffffffffffffffeeeeeeffeeeeeeeeeeeeeef
+-- 028:efffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeefffeeeeeeeefffeeeeeffeeeeeeeeffffffeeeeeeeefffffff
+-- 029:efffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeeeeeeeffeeeeeefffffffffffffffeeeeeeefeeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeefffffffffffeeeeffffeeefffffeefffffffffffffefffffffffffff
+-- 030:efffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeefffffffeeeeeeeeeeeeeefeeeeeefffffffffeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeffffffffffffffffffffffffffffffffffffffeeeeeeefffffffffffff
+-- 031:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffffffffffffffffffffffffffffffffffffeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeffffffffffffffffffffffffffffffeeeeeefffffffffffffffffff
+-- 032:effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeefffffffffffffffffffffffffffffffeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffffffffffffffffffffffffffffeeefffffffffffffffffffffff
+-- 033:eeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeffffffffffffffffffffffffffffffeeffffffffffffffffffffffffff
+-- 034:fffeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeefffffffffffffffffffffffffffeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeefffffffffffffffffffffffffffeeeeeeeffffffffffffffffffffffffff
+-- 035:fffffeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeefffffffffffffffffffffffffffeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeffffffffffffffffffffffffffffffffeeeffffffffffffffffffffffffffff
+-- 036:ffffffffffeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeeefffffffffffffffffffffffffffffffeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeffffffffeeeeffeeeeefeeeeeffffffeeeeeeeffffffffffffffffffffffffffff
+-- 037:fffffffffffffffffeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffeefffffffffeeeefeeeeefeeeeeffffffeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeefeeeefffffffffffffffeeffffeeeeeeeeeeeeffffffffffffffffffffffffff
+-- 038:eefeeeeeeeeeeefffffeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffeeeeeeeeeeffeeeeffffffffffffffeeffffeeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffeeeeeeeeeeefffffffffffffffffffffffffffffffffffeeeeeeeeeeeefffffffffffffffffffffff
+-- 039:eefffffffffffffffefffffeeeeeeeeeeeefffffffffffffffffffffffffffffffffffeeeeeeeeeefffffffffffffffffffffffffffffffffffeeeeeeeeeeeefffffefffffffffffffffeefffeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffeeeeeeeffffeeeeeefeeeeeeeeeeffff
+-- 040:fffffffffffffffffffffffffffffffffeeeeeeeeeeeffeeefffffffffffffeeeefeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffeeeeeffffffeeeefeeeeffeeeffffffffeeffffffffffffffffffffffffffffffffffffffffffffffffffeeefffffffffffffffffffffffffffeee
+-- 041:ffffffffffffffffffffffffffffffffffffffffffeefffffffffeffffeffffefffffffffeffffffffffffffffffffffffffffffffffffffffffffffffeeeeeeffffffffffffffffffffffeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeefffff
+-- 042:ffffffffffffffffffffffffffffffffffffffffffffffeeeeefffffffffffffffffffffeeffffffffffffffffffffffffffffffffffffffffffffffffffffeeeffffffffffffffffffffeeeefffffffffffffffffffffffffffffffffffffffffffffffffffeeffffffffffffffffffffffeeeeffffffff
+-- 043:eefffffffffffffffffffffffffffffffffffffffffffffffffeeffffffffffffffffffffffeffffffffffffffffffffffffffffffffffffffffffffffffeeeeefffffffffffffffffffffeeeeeffffffffffffffffffffffffffffffffffffffffffffeffffffffffffffffffeffffffffeefffffffffff
+-- 044:ffffeeeeeffffffffffffffffffffffffffffffffffffffffffeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeeffffeeeeefeeefeeeeeffeeeeeeeffffffffffffffffffffffffffffffffffffeeeeeeeeefffeffffffffffffffffffeeeeeeeeefffffffff
+-- 045:eefeeeeffffeeeeefffffffffffffffffffffffffffffffffffeeeeeeeeeffeefffffffffffeffffeeeeeeeeeffffffffffffffffffffffffffffeeeeeeeefffffffffffffffffffffffffffeeeeeeeeefffffffffffffffffefffeeeeeeeefffffffffffffffffffffffffffffffffffeeeeeefffeeeefe
+-- 046:ffffffffffffffffffffeeeeeeeeeffffffffffffffffeffeeeeeeeefffffffffffffffffffffffffffffffffeeeeeefffeeeefeeefeeeeffffeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeefffffffffffffffffffffffffffffffffffffffeeeefffffffffffff
+-- 047:fffffffffffffffffffffffffffffffeeffffffffffffffffffffeeeefffffffffffffffffffffffffffffffffffffeeeffffffffffffffffffefffffffffffffffffffffffffffffffffffffffffeeefffffffffffffffffeefffffffffffffffffffffffffffffffffffffffffeefffffffffffffffffe
+-- 048:ffffffffffffffffffffffffffffffffffffffeffffffffffffffffffffffffffffffffffffffffffffffffffffffffeeeefffffffffffffffffeeeeffffffffffffffffffffffffffffffffffffffffffefffeffefffffffeffffffffffffffffffffffffffffffffffeeeeeffeeefffefffeeeeeeeeeee
+-- 049:fffffffffffffffffffffffffffffffffffffffeeeefffeeeffeefeeeefeeeeeeffffffffffffffffffffffffffffeeeeeeefffffffffffffffffeeeeeeeefffffffffffffffffffffeeeeeeeffffffffffffffffffffffffeeeeeeeffeefffffffffeefeeeeeeefffffffffffffffffffffffffffffeeee
+-- 050:fffffffffffffffeeeeeeeffeffffffffeeeeeeeeeeffffffffffffffffffffffffffffeeeffffeeeeeefeefffffeffffffffffffffffffffffffffffffffeefffffffffffffffffeeeffffffffffffffffffffffffffffffffeeeffffffffffffffffffffffffffffffffffffffffffffffffffeeefffff
+-- 051:fffffffffffffffffffffffffffeffffffffffffffeefffffffffffffffffffffffffffffffffefffffffffffffffffffffffffffffffffffffffffffffffeeefffffffffffffffeeefffffffffffffffffffffffffffffffffffffffeffefffffefffffffffffffffffffffffffffffeeeefeeeffffffee
+-- 052:ffeeffffffffffffffffffffffffffeeeeffeeefffffeeeeeeeeeffffffffffffffffffffffeeeeeffffffffffffffffeeeeeeffffffffffffffffffeeeeefffffffffffffffffffffeeeeeefeeffffffeeeeeeeeefffffffffffffffffffffffffeeefffeefeefeeffffeffffffffffffffffffffffffff
+-- 053:fffffffffffffffffffffffffffffffffeffffffffffffffffffffffffffeeefffffffffffeeeffffffffffffffffffffffffffffeffffffffffffeefffffffffffffffffffffffffffffefffffffffffffefffffffffffffffffffffffffffeeefffffffffffffeeffffffffffffffffffffffffffeffff
+-- 054:ffffffffffffffffffffffffeffffeefefeefffeeffffffffffffffffffffffeeeeeeeffffffeffeeeeeffffffffffffffffffeeeeffffffffffffffffeeeeefffffffffffffeeeeefffffffffffffffffffeeeeefeeffefeeefeeeefffffffffffffffffffffffeffffffffffffffefffffffffffffffff
+-- 055:fffffffffffffeeeffffffffffeeffffffffffffffffffffffffffffffffffffefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeefffffffffffeeeffffffffffffffffffffffffffeffffefffeefffffffffffffffffffffeeefeeffeffeeeeeeefffffffffffffffffeeeee
+-- 056:ffeeeeefffffffffffeeeeffffffffffffffffeeeeeeeffffeefeeeffffffffffffffffffffffffefeffffffffffffffffffffffffffeeefffffffffeefffffffffffffffffffffffffffffffffefffffffffffffffffffffffeffffffffffffffffffffffffffffffffeeffffffffffeeffffffffffffff
+-- 057:fffffffffffffffeeeefefffffffeeeefffffffffffffeeeeffffffffffffeeeeffffffffffeeeffffffffffffffffeeefeefefeffeeffffffffffffffffffffffffffffffefffffffffffffffffffeeffffffffefffffffffffffffffffffeffffffffeeffffffffffffffffffffffffffffffeffffffff
+-- 058:ffffffffffffeeeeffffffffeeeefffffffffffeeeffffffff77ffeeeeffffffefeeeffffffffffffffeeefeeeeefffefffffffffffffffffffffffffffefffffffffffffffffeefffffffeffffffffffffffffffeefffffffefffffffffffffffffffffffffffeefffffffffffffffffefffffffffeffff
+-- 059:feefeeefeffeffffffffffffffffffffffffefffffff77777777777777777777777777777ffffffffffffeffffffffffffffffffffffffeffffffffffffffffeffffffffefffffffffffffffffffefeffeffffffffffffffeefefffeeeeefffffffffffeeefffffffffeeeeffffffffeeeffffffffffffee
+-- 060:ffffffeefeffefeefffffffffffeeeffffffee777fff66776777766666677777766666777ffffffffffefeee777777777ffffffffefffffffefffffffffffffeffffffeffffffffffffffeffffffeffffffffffffffeffffffefffffffffffffefffffffffffffffffffffeffeeeefeefffffffffffeeeef
+-- 061:fffeeffffffffeeffffffeeffffffffffe676777766666766677666666666776666666677ffffeffff7667766677766667777666677ffffffffffffffffffffeffffffefffffffffffffeeeffeffffffffffeeeffffeefffffffffeefffffffeeffffffeeeffffffffeeeeffefefffffffffffefffffffff
+-- 062:eefffffffeeeffeeefffffffff776777666766766666667666776666666667766666666777776666776666766677666666776666667fff776777667776667776667fffeefffffeeffffffeeffffffeeffffeefffffffffefeefffffffffffffffffefffffffffffffffffffffccdcccedffcccddcdeffcdc
+-- 063:efcdcccedfcccdffffffffffff766676666766766666667666776666666667766666666776766666676666766677666666776666667766766676666776666766667ffffffffffeeeefffffffeffffeefffffeffffffffffffffffffcdecdcccefcccdcdefcdcccedfcccdcdefcceeeeeeffceeeeeeeffcee
+-- 064:efceeeeeefceeeeeefceeeeeef766676666766766666667666776666666667766666666776766666676666766677666666776666667666666676666776666766666fffffffffffffffffffddfdccdfcdcefdccefceeeefceeeefceeeeeceeeeefceeeeeffeeeefeffeefefeffeeeeefefffeefeefefffeee
+-- 065:fffffffffffffffeffeeeefeff766676666766766666667666776666666667766666666776766666676666766677666666776666667666666676666776666766666eceeeeeefeeefeeeeceeefeefffeefffeefefefefffeeefffefefffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+-- 066:cdcedfccddeeefcccdcedfccdd766676666767777666667767777666666777777666667776766666677667766677766667777666677666666676666776666766666fffffffffffffffffffffffffffffffffffcdeefccdcdfcddeefccccedfccdeeefcccdcedfccddeeefcccdccedfccdddeeeffcccddced
+-- 067:eeeeefceeeeeefceeeeeefceee766777667777777777777777777777777777777777777777776666777777777777777777777777777766766777667776667776667eeeceefeeefeeeeceeefeeeeceeefceeeeceeeefceeeefceeeefceeeeefceeeeefceeeeeefceeeeeefceeeeeeefceeeeeeeffceeeeeee
+-- 068:eefeffeeeefeffffffffffffff777777eeeeeeeeeeeeeeee77777777eeeeeeeeeeee77777777777777eeeeeeeeeeeeeeeee77777777777777777777777777777777ffffffffffffffffffffffffffffffffffffffffffffffffffffeeefeffeeefeffeefffffffffffffffffffffffffffffffffffffffff
+-- 069:efcdcccedfcccdcdefcdcccedf766777eeeeeeeeeeeeeeee77777777eeeeeeeeeeee77777777666677eeeeeeeeeeeeeeeee77666677766766777667776667776667ecccedcefcddfdccdccddfdccdfcdcefdccefccdcefccccdfccdcdecdcccefcccdcdefcdcccedfcccdcdefccdcccedffcccddcdeffcdc
+-- 070:efceeeeeefceeeeeefceeeeeef76ffff2222222222222222dddd7fff222222222222ddd7767666ffff22222222222222222dddd6667666666676666776666766666fffffeeefeeefeeffefeefeefffeefffeefefceeeefceeeefceeeeeceeeeefceeeeeefceeeeeefceeeeeefcceeeeeeff4444333333333
+-- 071:ffffffffffffffffffffffffff76ffff2222222222222222ddddf22222c222222222222dd67666ffff22222222222222222dddd6667666666676666776666766666eeeccefcdefcdedcdeefffffffffffffffffffffffffffffffffffff33333333334444ee4443333333333333344444443333333333344
+-- 072:cdcedfccddeeefcccdcedfccddff222222cc2222222222222222dd2222c222222222222dd676ff222222cc22222222222222222dd67666666676666776666766666a9aaaaa98a898a89a8afee333444444443333333444444444333333333333333444444443333333444444444333333333333333334444
+-- 073:eeeeefceeeeeef9aa99aaaaaa9ff222222cc2222222222222222ddff222222222222ddd22676ff222222cc22222222222222222dd67766766676666776666766667aa9aa9aaa8333333334444333333333444443334444444444443333344444444444333333333334444444444443333333333333444444
+-- 074:8a8aa98a88aa9aa99aaa9aa99a22ffff2222222222222222dddd2222eeeeeeeeeeee2222277722ffff22222222222222222dddd22778a9aa6777667776667776668aaa9aaaaaaaaaa9aa898aa334444444444333344444444444433333444444444444433333333444444444444444333333333333444444
+-- 075:aaaa98aaa8aa8aaa899aa88aa922ffff2222222222222222dddd2222eeeeeeeeeeee222229a822ffff22222222222222222dddd2277a98aaa9aaaaaaaaaaaaa89aaaaa8a8a8aaaaaaa88a998aaa89a89aaaaaaaa88a89aaaa444443334444444444444443333334444444444444444333333333344444444
+-- 076:8aaa989a8aaa889aaaaaaaaaa8222222eeeeeeeeeeeeeeee22222222222222222222222dd888222222eeeeeeeeeeeeeeeee222222aaaa98aaa8aaaaaaaaaaaa8aaa8aaaa9aaaaaaaaaaaaa89aaa9998aaa889aaa8aaaa998aaa9aaa99aaa999aa99aaa9aa433444444444444444444443333334444444444
+-- 077:99aa888aa999aaaa9aaaaa99aa222222eeeeeeeeeeeeeeee222222f222222222222222ddda88222222eeeeeeeeeeeeeeeee222222aaaaaa99aaaa98aaaa9aaaaaaaaaaaaaaaaa88aaaaaa98aa888aaaaaaaaa898a998aaaa889aa89aaaaaaaaaa8a8aa9aaaaaaa88aaaaaaaaaaaaaaaaa333344444444444
+-- 078:999aaa8a8aaa999aaaa99aaaaaff222222222222222222222222ddf222222222222222ddd99aff2222222222222222222222222ddaaa8899aaaaaaaaaaaaa99aaaa989aaaa99aaaaaaaaaaaaaaaaaa88aaaaaaaa8aa8a8aaaaaaaaaa8888aa998aaaa8899aa99aaaaaaaaaaa898aa99aaaaaaa98aaaaaaaa
+-- 079:88aaaaa89aa8a8aa99aaaa999aff222222222222222222222222ddffeeeeeeeeeeeeddd2299aff2222222222222222222222222ddaaa998aaaa8aaaa88aaaaaaaaaaaaaaaaa8a8aaa99aaaaaa899aa899aaaaaaaaaaaaa99aaa998aaaaaa99aa88a8aaaaaaaaaaaaaaaa98aaaa8aaaaa89aaaaaaaaaaaaaa
+-- 080:aaaaaaaaaaaaa998aaaaaaaaaaffff22222222222222222222dddd2feeeeeeeeeeeedd222aaaffff222222222222222222222dddd8a8aaaaaaaaaaaaaaaaaa98aaaaa8aaaaa999aaaaaaaaaaaaaaaaaaaa99aaaa899998aaaaa98a99aaaa8aaaaaa99988aaaa99aa9aa99aaaaa9999aaaa998aaaa99aaaaa
+-- 081:9aaaaaaaaaaaaaaaaaa9aa89aaffff22222222222222222222dddd2feeeeeeeeeeeedd222aaaffff222222222222222222222dddda889aa88888aaa889aaaaa899aa8aaaaa99aaaaa999aaaa8898aaaa9999aaaaaa99aa9a889aaaaa88999aaaaaaaaaaaaa9a899aaaaaa9999aaaaa999aaaaaaaaaaaaaaa
+-- 082:aaaaaaaaaaa9aa999aaaaa999922ffffeeeeeeeeeeeeeeeedddd2222222222222222222dda8822ffffeeeeeeeeeeeeeeeeedddd229998aaaaaaa8899aaa899aaaaaaaaaaaaaaaa8988aaa999aaaaaaaaa998aa88a8aaaaaaaaaaaaaaaaaaaaa988aaaaa88aaaaaa999aaaaaaaaaaaaaaaaaaaaaaa99aaaaa
+-- 083:aaaa988a99aaaaaaaaaaaaaaa922ffffeeeeeeeeeeeeeeeedddd22f222222222222222ddd99a22ffffeeeeeeeeeeeeeeeeedddd22aaaa88a88aaa988aaaaa998aaaaa999aaaaaa9999aaaaaa999aaaaaa999aaaaaa99999aaaaa8aa8aaaaa999888aaaaaa88999988aaaaa999aaaaaaaaaaaaaaaaaaaaaaa
+-- 084:aaaaaaaaaaaaaaaaaaa88888aa2222ffeeeeeeeeeeeeeeeedd2222f222222222222222ddd8aa2222ffeeeeeeeeeeeeeeeeedd2222aaaaaaaaaaaaaaaaaaaa988aaaaaa88aaaaaaa999aaaaaaaaaaaaaaaaaaaaaaaaaaa999aaaaaa9999998aaaaaa9988a99aaaaaaaaaaaaaaaa999988aaaaa999aaaaaa99
+-- 085:a8998aaaaaa9999aaaaaaa999a2222ffeeeeeeeeeeeeeeeedd2222ffeeeeeeeeeeeeddd22aaa2222ffeeeeeeeeeeeeeeeeedd2222aaaaaaaaaaaaaaaaaa9999aaaaaaa888aaaaaaa999aaaaaaaaaaaaaaaaaaaaaaaaaaaa8aaa8889aaaaaaaaaaa999aaaa888888aaaaaaaaaaaaaaaaaa8998aaa999888aa
+-- 086:aaaaaa9998aaa9aaaaaaaaaaaaff222222222222222222222222dd2feeeeeeeeeeeedd222aaa2222ffeeeeeeeeeeeeeeeeedd2222aaaaaaaaa998aaaaaaaa988aaaaa8888888aaa888aaaaaaa988aaaaaa8998aaaaaaa9999aaaaaaa9999aaaaaaaaa999aaaaaaa999999aaaa888a88aaaaa99999888aaaa
+-- 087:aa88998aaaaaaaaaaaaaaaaaaaff222222222222222222222222dd2feeeeeeeeeeeedd222aaaff2222222222222222222222222dda88aaaaaaaa8999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa999aaaaaaa89999998aaaaaaaa9988aa99aaaaaaaaaaaaaaaaaaa9999988aaaaaaa998aaa9aaa9999aaaaaaa
+-- 088:9aaaaaaaaaaaaaaaaaaaaaaaaaffff22222222222222222222dddd22222222222222222ddaaaff2222222222222222222222222ddaaaaaaa9998aaaa8888888aaaaaaaaaaaaaaaaaaaaa89998aaaa9999888aaaaaaaaa889999aaaa889988aaaaaaaaaaaaaaaaaaaaa888a88aaaa8899aaaaaaaaaaaaaa98
+-- 089:aaa888988aaaaaaa8999aaaaaaffff22222222222222222222ddddff222222222222ddd88888ffff222222222222222222222dddd9a8888aaaaaaaa8888a99aaaaaaaaaaaaaaaaaaaaaaaaaaaa9999aaaaaaaaa998899aaaaaaaa9999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9888aaaaaaaaaaaaa
+-- 090:99a8888aaaaaaaaa888999999a22ffffeeeeeeeeeeeeeeeedddd22ff222222222222dddaaaa9ffff222222222222222222222dddd88aaaaaa8889aaaaaaaa8888aaaaa8889988aaaaaaa8899aaaaaaaaa89999aaaaaaaaaaaa9999aaaaaaaa9999999aaaaaa88898888aaaa9999999988aaaaaaaaa9888a9
+-- 091:aaaa88899aaaaaaaaaaaaaaaaa22ffffeeeeeeeeeeeeeeeedddd22aaeeeeeeeeeeee99aaaaaa22ffffeeeeeeeeeeeeeeeeedddd22aaaaaaaaa9999a8889aaaaaaaa98888a999a88899aaaaaaaaa8899999999aaaaa88888888aaaaaa9999999aaaaaaaaa9999aaaaaaaaaaaaa99998aaaaaaaaa99988aaaa
+-- 092:99aaaaa899988aaaaaaaaaaaaa2222ffeeeeeeeeeeeeeeeedd222299eeeeeeeeeeeeaaa9999822ffffeeeeeeeeeeeeeeeeedddd22aaaaaaaaaaaaaaaaaaa98888aaaaaaaaa88aaaaaaaaaa89999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9999aaaaaaaaa9999999998aaaaaaaaaa99888aa999a
+-- 093:aaaaaaaaaaaaaaaaaaaaaaaaaa2222ffeeeeeeeeeeeeeeeedd2222aaaaaaaaaaaaaaaa9988aa2222ffeeeeeeeeeeeeeeeeedd2222aaaaaaaa88899888aaaaa99998888aaaaaaaaaa888889999aaaaa8999988aaaaaaaaaaaaaaaaaaaaaaaaaa888888888aaaa88999aaaaaaaaaaaaaaaaa998888aaaaaaaa
+-- 094:999999aaaaaaaaaaaaaaaaaaaaff222222222222222222222222dd9999999998aaaaaaaaa9992222ffeeeeeeeeeeeeeeeeedd2222aaaaaaaaaaaaaaaaa999988aaaaaaaaaa888aaaaaaaaa88889aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa888aa8888aaaaa99999aaaaaaaaaaaaaaa8999999aaaaa
+-- 095:8aaaaaaaaa899999aaaaaaaaaaff222222222222222222222222ddaaaaaaaa99999aaaaaaaaaff2222222222222222222222222ddaaaaa999999988888aaaaaaaaaaa88889999999888aaaaaaaaaa99988aaaa9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa99999aaaaaaaaaaaa88888aaaaaaaaaa899
+-- 096:99aaaaaaaaaaaaaaa999999aaaaaffff2222222222222222dddd998888aaaaaa888889aaaaaaff2222222222222222222222222ddaaaaa89999aaaaaaaaaaaa999999aaaaaaaaaaaaaaa99999aaaaaaaaaa9999999999aaaaaa88888a8888aaaaaaa999999999888aaaaaaaaaaa988888a9999988888aaaa
+-- 097:88999999888889aaaaaaaaaaaa88ffff2222222222222222dddd8888aaaaaa99999999999aaaaaffff22222222222222222dddd999999aaaaaaaaaaaa999998aaaaaaaaaa88999988aaaaaaaa888899aaaaaaaaaaa88888aaaaaa8888898888aaaaaaaa888999aaaaaaaaaaaa899999aaaaaaaaaaaaaaaaa
+-- 098:8889aaaaaaaaaaaaa999999aaaaaaaaaeeeeeeeeeeeeeeeeaaaaaaaaaaaaaaaa99aaaa889999aaffff22222222222222222ddddaaaaaaaaaaaaa888899999999aaaaaaaaa888aa8888aaaaaaaa99999999999aaaaaaaaaaa99999aaaaaaaaaaaaaaa999999aaaaaaaaaaaa999999aaaaaaaaaaaa8999988a
+-- 099:aaaaaaaa998888aaaaaaaaaaaaaaaaaaeeeeeeeeeeeeeeeeaaaaaaaaaaaaaaaaaaaaaaaaa999998aaaeeeeeeeeeeeeeeeeeaaaaaaaaaaa999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa99aaaa889999aaaaaaaaaaa88889999999988888aaaaaaaaaaaaa8888899999999aaaaaaaaa888aaa
+-- 100:8888999999aaaaaa888999888aaaaaaaeeeeeeeeeeeeeeeeaaaaaaaaaa888888a88888aaaaaa889999eeeeeeeeeeeeeeeeeaaaaa9888888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa999999aaaaaaaaaaaa9888889aaaaaaaaaaaaa9999999aaaaaaaaaaaaaaaaaaaaaaaa
+-- 101:99988aaaaaa888888888888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88999988aaaaaa9999999888888aaaaaaaaaaaaa88888999999aaaaaa88889988888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa8888aa8888aaaaaaa888999aaaaaaaaaaaaaaaaaaaaaaaa8888889aaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 102:889999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88aaaa888aaaaaaa8889999aaaaaaaaaaaaaaaaaaaaa9999999aaaaaaa888889988888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9999999aaaaaaa999999988888aaaaaaaaaaaaaaaa888999999aaaaaa8888889888888aaaaaaa
+-- 103:999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa99999988aaaaaaaaaaaaaa8888aaaaaaaaaaaaa888889aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa8888aaa8888aaaaaaaa8999999aaaaaaaaaaaaaaaaaaaa899999999aaaaaaa8889999888aaaaaa
+-- 104:8888888999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa99aaaaa8999999aaaaaaaaaaaaaaa9999998899999aaaaaaaaaaaaa9999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9998888aaaaaaaaaaaaaaa8aaaaaaaaaaaaa9888888aaaaaa88aaaaa888aaa
+-- 105:a9999999999999aaaaaaaa888888aa88888aaaaaaaaaa999999999988888aaaaaaaaaaaaaaaa888888899999999888888aaaaaaaaaaaaa9999888aaaa999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9999999aaaaaaaaaaaaaaa9998888899aaaaaaaaaaaaa9999999aaaaaaaaaaaaa
+-- 106:a9999998aaaaaaaaaaaaaa899999988aaaaaaaaaaaa99999999999aaaaaaaaaaaaaaaa99999999aaaaaaaaaaaaaaa9999999aaaaaaaaaaaaaa88899999999999aaaaaaaaaaaa88aaaaaa8aaaaaaaaaaaaaaa999999aa8888899aaaaaaaaaaaaaaaa888899999999999988aaaaaaaaaaaaaa9999999aaaaaa
+-- 107:a88888889aaaaaaa88888889888888aaaaaaaaaa88888999aaaaaaaaaaaaaaaa88899999aaaaaaaa8aaaaaaaaaaaaaaa9999999aaaaaaaaaaaaaa99999999999aaaaaaaaaaa8888899888888aaaaaaaaa9999999999999988aaaaaaaaaaaaaaaa99998888aaa99999aa88888899aaaaaaaaaaaaaa8888888
+-- 108:aa9999999aaaaaaaaaaaaaaa88aaaaaaaa99999888aaaaaaaaaaaaaaaa999888888aaaaaaaaa888888888888888aaaaaaa99888888aaaaaaaaaaaaaaa9998888aaaaaaaaaaaaa889999998aaaaaaaaaaaaaaa999999999aaaaaaaaaaaaaaaa99999999aaaaaaaaaaaaaaaaaaa99999999aaaaaaaaaaaaaa8
+-- 109:aa99999999aaaaaaaaaaaaaaaaa999999999aaaaaaaaaaaaaaaaa9999999999aaaaaaaaaaaaaaa999999998aaaaaaaaaaaaaa88999999aaaaaaaaaaaaaaa88888999aaaaaaa8888888a8888888aaaaaaaa888888889aaaaaaaaaaaaaaaaa88888999aaaaaaaaa888aaaaa88aaaaaaaa99999998aaaaaaaaa
+-- 110:aaa9888888aaa99999aaa888889999aaaaaaaaaaaaaaaaa88999999999999999aaaaaaaaa888888889888888aaaaaaaaaaa9999999999999aaaaaaaaaaaaaaa99999999aaaaaaaaaaaaaaaaaaaaaaaa999999988aaaaaaaaaaaaaaaaa999998888aaaaaaaaaaa888888998888888aaaaaaaaa88888888aaa
+-- 111:aaa888999999999999988888aaaaaaaaaaaaaaaaa998888888a99999999aaaaaaaaaaaaaaaa88aaaaaa888aaaaaaaaaaaaa9999999999999888aaaaaaaaaaaaaaaa99999999aaaaaaaaaaaaaaaaa999999999aaaaaaaaaaaaaaaaaa999999999999aaaaaaaaaaaaaa8899999998aaaaaaaaaaaaaaaa89999
+-- 112:aaa999998888999999aaaaaaaaaaaaaaaaaa999999998aaaaaaa99aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9999999aa88888889aaaaaaaaaaaaaaaa98888888aa9999999aa888888999aaaaaaaaaaaaaaaaaaa889999999999999999aaaaaaaaa8888888898888888aaaaaaaaaaa99999
+-- 113:aaaa8888888aaaaaaaaaaaaaaaaaaa999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa899999999aaaaaaaaaaaaaaaaa8889999999999999888888aaaaaaaaaaaaaaaaaa988888888a999999999aaaaaaaaaaaaaaaa88aaaaaa888aaaaaaaaaaaaaa99
+-- 114:aaaa8aaaaaaaaaaaaaaaaaaa8888889999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa999999999aaaaaaaaaaaaaaaaa9999998899999999aaaaaaaaaaaaaaaaaaa999999998aaaaaaa999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 115:aaaaaaaaaaaaaaaaaaa999888888aaaaaaaaaa88aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa999999988aaaaaaaaaaaaaaaaa8888888889aaaaaaaaaaaaaaaaaaa9999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 116:aaaaaaaaaaaaa8999999999aaaaaaaaaa88888888a88888888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa8aaaaaaaaaaaaaaaaaa888888888aaaaaaaaaaaaaaaaaa888aaaaaaaaaaaaaaaaaaaa8889999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 117:aaaaaaa88888888999999999aaaaaaaaa88889999988888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88888888aa8888888aaaaaaaaa888899999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa98888888889aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 118:aaaaaa8888889999999999aaaaaaaaaa88999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa8888899998888888aaaaaaaaaa99999999998aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9999999888aaaaaaaaaaa88888aaaaa8888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 119:aaaaaa99999999999aaaaaaaaaa88888888999888888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9999999999aaaaaaaaaaa99999999998888888aaaaaaaaaaaaaaaaaaaaaaaaa8889999999999aaaaaaaaa8888888889888888888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 120:aaaaaaa999988888aaaaaaaaaa8888888aaa88888888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa8888889999988888aaaaaaaaaa99999999988888888aaaaaaaaaaaaaaaaaaaaa88888888889999999999aaaaaaaaa88899999998888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 121:aaaaaaa8888888888aaaaaaaaaa8aaaaaaaaa88aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88888888aa888888888aaaaaaaaaa999999999988aaaaaaaaaaaaaaaaaaaaaaaaaaaa8888899999999999aaaaaaaaaaa889999999988aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 122:aaaaaaaa8888999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa888aaaaaaa8888aaaaaaaaaaa88888999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa99999999999aaaaaaaaaaa888888889998888888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 123:aaaaaaaa9999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88888888888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa99999988888aaaaaaaaaa8888888aaa888888888aaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 124:aaaaaaaa99999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa999999888888aaaaaaaaaaaaaaaaaaaaaaa88aaaaaaaaaaaaaaaaaaaaa8888888888aaaaaaaaaaa88aaaaaaaa888aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 125:aaaaaaaaa9999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa999999999998aaaaaaaaaaaaaaaaaaaaaaa88888888aaaaaaaaaaaaaaaaaaaaa88888899999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 126:aaaaaaaaa99999988888aaaaaaa9999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa999999999999aaaaaaaaaaaaaaaaaaaaaaaa9988888888889aaaaaaaaaaaaaaaaaaaaaa8999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 127:aaaaaaaaaa98888888888aa999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9aaaaaaaaaaa999999999999aaaaaaaaaaaaaaaaaaaaaaaa9999999988889999999aaaaaaaaaaaaaaaaaaaaaa99999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 128:aaaaaaaaaa8888888899999999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa999999aaaaaa888889999999aaaaaaaaaaaaaaaaaaaaaaaaa889999999999999999999999aaaaaaaaaaaaaaaaaaaaaa999999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 129:aaaaaaaaaaa8889999999999999999999aaaaaaaaaaaaaaaaaaa8888aaaaaaaa888aaaaaaaaaaaaaaaaaaaaaa999999999999a888888888899aaaaaaaaaaaaaaaaaaaaaaaaa888888899999999999999999998888aaaaaaaaaaaaaaaaaaaaaaa99999999998aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- 130:aaaaaaaaaaa99999999999999999999999aaaaaaaaaaaaaa888888888aaaa8888888aaaaaaaaaaaaaaaaaa99999999999999999888888888aaaaaaaaaaaaaaaaaaaaaaaaa98888888888899999999999999888888888aaaaaaaaaaaaaaaaaaaaaaa999999888888aaaaaaa9999aaaaaaaaaaaaaaaaaaaaaa
+-- 131:aaaaaaaaaaa99999999999999999999aaaaaaaaaaaaaaa888888888889888888888888aaaaaaaaaaaaa99999999999999999999998888aaaaaaaaaaaaaaaaaaaaaaaaaa9999988888888aaaa999999999aa888888888889aaaaaaaaaaaaaaaaaaaaaaaa88888888888aa9999999999aaaaaaaaaaaaaaaaaa
+-- 132:aaaaaaaaaaaa999999999999999aaaaaaaaaaaaaaaaaaaa8888889999998888888aaaaaaaaaaaaaaaaa99999999999999999999999aaaaaaaaaaaaaaaaaaaaaaaaaa9999999999988aaaaaaaaa99999aaaaaaa888888999999aaaaaaaaaaaaaaaaaaaaaaaa888888888999999999999999aaaaaaaaaaaaaa
+-- 133:aaaaaaaaaaaa999999999998aaaaaaaaaaaaaaaaaaaaaaaa889999999999888aaaaaaaaaaaaaaaaaaaaaa999999999999999999aaaaaaaaaaaaaaaaaaaaaaaaaaa9999999999999aaaaaaaaaaaaaaaaaaaaaaaaaa899999999999aaaaaaaaaaaaaaaaaaaaaaaa888889999999999999999999aaaaaaaaaaa
+-- 134:aaaaaaaaaaaaa999999888888aaaaaaaaaaaaaaaaaaaaa8889999999999988aaaaaaaaaaaaaaaaaaaaaaaa99999999999999aaaaaaaaaaaaaaaaaaaaaaaaaaa99999999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa999999999999aaaaaaaaaaaaaaaaaaaaaaaaa999999999999999999999999aaaaaaa
+-- 135:aaaaaaaaaaaaa998888888888aaaaaaaaaaaaaaaaa888888889999998888888aaaaaaaaaaaaaaaaaaaaa8888999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaa99999999999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa999999999999aaaaaaaaaaaaaaaaaaaaaaaaa99999999999999999999999aaaaa
+-- </SCREEN>
 
 -- <PALETTE>
 -- 000:1a1c2c5d275db13e53ef7d57ffcd75a7f07038b76425717929366f3b5dc941a6f673eff7f4f4f494b0c2566c86333c57

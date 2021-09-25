@@ -60,8 +60,8 @@ Weapon = {
 Weapon.__index = Weapon
 
 -- Weapon States:
--- 0: up
--- 1: down
+-- 0: raise
+-- 1: lower
 -- 2: ready
 -- 3: shoot
 -- 4: reload
@@ -88,15 +88,11 @@ Player = {
 	weapon_state = 0,
 	weapon_timer = 0,
 }
+setmetatable(Player, {__index = Entity})
 Player.__index = Player
-setmetatable(Player, Entity)
 
 function Player.new(pos_x, pos_y, speed_rot, speed_move)
-	local self = setmetatable({}, Player)
-	self.pos_x = pos_x
-	self.pos_y = pos_y
-	self.speed_rot = speed_rot
-	self.speed_move = speed_move
+	local self = setmetatable(Entity.new(pos_x, pos_y, speed_rot, speed_move), Player)
 	return self
 end
 
@@ -127,8 +123,8 @@ function Player:process(delta)
 		self.weapon_state = 2
 	elseif self.weapon_state == 1 and self.weapon_timer >= weapon.up_time then
 		self.weapon_state = 0
+		self.weapon_timer = 0
 		self.weapon_idx = self.weapon_idx % 3 + 1
-		local weapon = self.weapons[self.weapon_idx]
 	elseif self.weapon_state == 3 and self.weapon_timer >= weapon.shoot_time then
 		if weapon.reload_time == 0 then
 			self.weapon_state = 2
@@ -149,10 +145,10 @@ Sprite = {
 	scl_vert = 1,
 	offset_vert = 0, --from 0.5 (floor) to -0.5 (ceiling)
 	screen_offset_vert = 0,
+	screen_width = 0,
+	screen_height = 0,
 	dist = 0, --Distance to player (negative if not in viewing triangle)
 	screen_x = 0,
-	SCREEN_WIDTH = 0,
-	SCREEN_HEIGHT = 0,
 	draw_start_y = 0,
 	draw_end_y = 0,
 	draw_start_x = 0,
@@ -188,30 +184,106 @@ function Sprite:process(inv_det)
 	end
 	local trans_x = inv_det * (player.dir_y * rel_x - player.dir_x * rel_y)
 	self.screen_x = math.floor((SCREEN_WIDTH * 0.5) * (1 + trans_x / trans_y))
-	self.SCREEN_WIDTH = math_abs(SCREEN_HEIGHT // trans_y) // self.scl_horiz
-	self.draw_start_x = self.screen_x - self.SCREEN_WIDTH // 2
+	self.screen_width = math_abs(SCREEN_HEIGHT / trans_y) / self.scl_horiz
+	self.draw_start_x = self.screen_x - self.screen_width // 2
 	if self.draw_start_x < 0 then
 		self.draw_start_x = 0
 	elseif self.draw_start_x >= SCREEN_WIDTH then
 		self.dist = -self.dist
 		return
 	end
-	self.draw_end_x = self.screen_x + self.SCREEN_WIDTH // 2
+	self.draw_end_x = self.screen_x + self.screen_width // 2
 	if self.draw_end_x >= SCREEN_WIDTH then
 		self.draw_end_x = SCREEN_WIDTH - 1
 	elseif self.draw_end_x < 0 then
 		self.dist = -self.dist
 		return
 	end
-	self.SCREEN_HEIGHT = math_abs(SCREEN_HEIGHT // trans_y) // self.scl_vert
+	self.screen_height = math_abs(SCREEN_HEIGHT / trans_y) / self.scl_vert
 	self.screen_offset_vert = SCREEN_HALF_HEIGHT * self.offset_vert // trans_y
-	self.draw_start_y = SCREEN_HALF_HEIGHT - self.SCREEN_HEIGHT // 2 + self.screen_offset_vert
+	self.draw_start_y = SCREEN_HALF_HEIGHT - self.screen_height // 2 + self.screen_offset_vert
 	if self.draw_start_y < 0 then
 		self.draw_start_y = 0
 	end
-	self.draw_end_y = SCREEN_HALF_HEIGHT + self.SCREEN_HEIGHT // 2 + self.screen_offset_vert
+	self.draw_end_y = SCREEN_HALF_HEIGHT + self.screen_height // 2 + self.screen_offset_vert
 	if self.draw_end_y >= SCREEN_HEIGHT then
 		self.draw_end_y = SCREEN_HEIGHT - 1
+	end
+end
+
+function Sprite:set_enemy_tex(tex_id)
+	self.tex_id = tex_id
+	self.scl_horiz = 48 / g_SPRITE_SIZES[tex_id][1]
+end
+
+Enemy = {
+	state = 0,
+	tex_ids = {},
+	sprite = nil,
+}
+setmetatable(Enemy, {__index = Entity})
+Enemy.__index = Enemy
+
+g_enemy_pistol_tex_ids = {192, 194, 195, 196, 198, 200, 202, 204, 160}
+
+-- Enemy types
+-- 0: pistol
+
+-- Enemy states
+-- 0: neutral
+-- 1: raise
+-- 2: ready
+-- 3: shoot
+-- 4: die
+
+-- Enemy sprites
+-- 1: forward
+-- 2: left
+-- 3: right
+-- 4: back
+-- 5: raise
+-- 6: ready
+-- 7: shoot
+-- 8: die
+-- 9: corpse
+
+function Enemy.new(type, pos_x, pos_y)
+	local self = setmetatable(Entity.new(pos_x, pos_y, 0.001, 0.003), Enemy)
+	if type == 0 then
+		self.tex_ids = g_enemy_pistol_tex_ids
+		self.sprite = Sprite.new(pos_x, pos_y, 0, 1, 1.5, 0.25)
+	end
+	return self
+end
+
+function Enemy:process(delta)
+	local player = g_player
+	local player_rel_pos_x = self.pos_x - player.pos_x
+	local player_rel_pos_y = self.pos_y - player.pos_y
+	local angle = math.atan2(
+		self.dir_x * player_rel_pos_y - self.dir_y * player_rel_pos_x,
+		self.dir_x * player_rel_pos_x + self.dir_y * player_rel_pos_y)
+	local sprite = self.sprite
+	if self.state == 0 then
+		local tex_idx
+		if angle >= 0 then
+			if angle <= 0.785398163397 then --pi / 4
+				tex_idx = 1
+			elseif angle >= 2.35619449019 then --3 * pi / 4
+				tex_idx = 4
+			else
+				tex_idx = 2
+			end
+		else
+			if angle >= -0.785398163397 then --pi / 4
+				tex_idx = 1
+			elseif angle <= -2.35619449019 then --3 * pi / 4
+				tex_idx = 4
+			else
+				tex_idx = 3
+			end
+		end
+		self.sprite:set_enemy_tex(self.tex_ids[tex_idx])
 	end
 end
 
@@ -223,11 +295,18 @@ function init()
 	g_SCREEN_WIDTH = 240
 	g_SCREEN_HEIGHT = 120
 	g_DEBUG = true
-	g_TEX_WIDTH = 16
-	g_TEX_HEIGHT = 16
 	g_SPRITE_SIZES = {
 		[0]={16,16},
 		[2]={16,16},
+		[192]={16,32},
+		[194]={8,32},
+		[195]={8,32},
+		[196]={16,32},
+		[198]={16,32},
+		[200]={16,32},
+		[202]={16,32},
+		[204]={16,32},
+		[160]={32,16},
 	}
 	g_TEX_MAP = {
 		[1]=1,
@@ -244,10 +323,15 @@ function init()
 		Sprite.new(13, 13, 0, 2, 2, 0.5),
 		Sprite.new(18.5, 6.5, 2, 2, 1, 0.125),
 	}
+	g_enemies = {
+		Enemy.new(0, 17, 13),
+	}
 	g_settings = {
 		floor_ceil = true,
 		interlace = 2, --disabled=g_interlace>=2
 	}
+	trace(g_player.process)
+	trace(g_enemies[1].process)
 end
 
 init()
@@ -259,13 +343,16 @@ function TIC()
 	local SCREEN_WIDTH = g_SCREEN_WIDTH
 	local SCREEN_HEIGHT = g_SCREEN_HEIGHT
 	local SCREEN_HALF_HEIGHT = SCREEN_HEIGHT // 2
-	local TEX_WIDTH = g_TEX_WIDTH
-	local TEX_HEIGHT = g_TEX_HEIGHT
+	local TEX_WIDTH = 16
+	local TEX_HEIGHT = 16
 	local SPRITE_SIZES = g_SPRITE_SIZES
 	local TEX_MAP = g_TEX_MAP
 	local player = g_player
 	local sprites = g_sprites
+	local enemies = g_enemies
 	local settings = g_settings
+	local WEAPON_X = 104
+	local WEAPON_Y = 72
 	local math_floor = math.floor
 	local math_abs = math.abs
 
@@ -291,6 +378,10 @@ function TIC()
 
 	player:process(delta)
 
+	for _,enemy in pairs(enemies) do
+		enemy:process(delta)
+	end
+
 	if btnp(5) then
 		settings.floor_ceil = not settings.floor_ceil
 	end
@@ -303,7 +394,14 @@ function TIC()
 
 	local inv_det = 1 / (player.plane_x * player.dir_y - player.dir_x * player.plane_y)
 	local visible_sprites = {}
-	for key,sprite in pairs(sprites) do
+	for _,sprite in pairs(sprites) do
+		sprite:process(inv_det)
+		if sprite.dist > 0 then
+			visible_sprites[#visible_sprites+1] = sprite
+		end
+	end
+	for _,enemy in pairs(enemies) do
+		local sprite = enemy.sprite
 		sprite:process(inv_det)
 		if sprite.dist > 0 then
 			visible_sprites[#visible_sprites+1] = sprite
@@ -314,8 +412,6 @@ function TIC()
 	local num_visible_sprites = #visible_sprites
 
 	--draw weapon
-	local WEAPON_X = 104
-	local WEAPON_Y = 72
 	local weapon = player.weapons[player.weapon_idx]
 	if player.weapon_state == 0 then
 		map(weapon.textures_x[1], weapon.texture_y, 6, 6, WEAPON_X, WEAPON_Y + 48 * (1 - player.weapon_timer / weapon.up_time))
@@ -400,10 +496,10 @@ function TIC()
 				current_sprite = sprite_idx + 1
 				if x >= sprite.draw_start_x and x <= sprite.draw_end_x then
 					local sprite_size = SPRITE_SIZES[sprite.tex_id]
-					local a = sprite_size[2] / sprite.SCREEN_HEIGHT
-					local sprite_tex_x = math_floor((x - (sprite.screen_x - sprite.SCREEN_WIDTH / 2)) * sprite_size[1] / sprite.SCREEN_WIDTH) % sprite_size[1]
+					local a = sprite_size[2] / sprite.screen_height
+					local sprite_tex_x = math_floor((x - (sprite.screen_x - sprite.screen_width / 2)) * sprite_size[1] / sprite.screen_width) % sprite_size[1]
 					for y=sprite.draw_start_y,sprite.draw_end_y do
-						local tex_y = math_floor((y - sprite.screen_offset_vert - SCREEN_HALF_HEIGHT + sprite.SCREEN_HEIGHT / 2) * a) % sprite_size[2]
+						local tex_y = math_floor((y - sprite.screen_offset_vert - SCREEN_HALF_HEIGHT + sprite.screen_height / 2) * a) % sprite_size[2]
 						local color = get_tex_pixel(0xC000, sprite.tex_id, sprite_tex_x, tex_y)
 						if color > 0 and pix(x, y) == 0 then
 							pix(x, y, color)
@@ -727,6 +823,67 @@ end
 -- 017:eeeed220222222d022222dd0eeeedd20eeeed220222222d02222dd00eeee0000
 -- 018:0400000303440003000344430000000300000003000000030000033400003444
 -- 019:4000004040004430444430004000000040000000400000004440000044440000
+-- 161:00000000000000000000000000000000000000000000000000eee000ddeeed00
+-- 176:00000000000000000000000600044777024422ee2000eeee000eeeef000eeff0
+-- 177:deeeee670666677766555555ee655556eef667ffef777feef77700ee00000000
+-- 178:ff000000725600005625550066726655e7726666eff22222eeef2200eeee0000
+-- 179:0000000000000000000000006600000066444000220000000000000000000000
+-- 192:000000dd00000dde00000d2200000d440000004300000f340000eed30006e666
+-- 193:ee000000eee0000022e0000044e000003400000043f00000366f000065556600
+-- 194:00dddd000eeeedd0022eeed004444ee00034440000444ff000dfffff0ef55667
+-- 195:00dddd000ddeeee00deee2200ee44440004443000ff44400ffeffd00766e5f60
+-- 196:000000dd00000ddd00000dee00000eee0000004400055eee0055566e00566677
+-- 197:de000000eee00000eee00000eee0000044000000efe65000eee665006e776500
+-- 198:0000000d000000dd000000d2000000d400000004000000d300005dee005566e6
+-- 199:dee00000eeee0000222e0000444e000033400000443e000033eed00066655550
+-- 200:000000dd00000dde00000d2200000d44000000fd000566fe0065554407766444
+-- 201:ee000000eee0000022e0000044e00000d4000000e46665003445567034466670
+-- 202:000000dd00000dde00000d2200000d420000002c000566f20065554207766444
+-- 203:ee000000dde0000022e0000034e0000043000000336665002445567034466670
+-- 204:0000eee0000eeeee000eedff000edfff000efff3000efff30000003300000033
+-- 205:00000000d0000000f0000002f000002033333000344200024444420066f44000
+-- 208:00555e65005656e60556556e056765560567f5550567feec0567ffee05676555
+-- 209:565555605655555066557550ee6675507efe7650deeef650eefff65075567650
+-- 210:0e7565670666555700e65557006e667700df657f00df555f0055557700547777
+-- 211:7656f7607555e6607555ff0077667f00f756fc00f555fc007755550077774500
+-- 212:055755660557766f055677ff0557fff7056eedde0567edde0567655506675555
+-- 213:ff757550f6677650e66766506e777650eeff7650eefff6505556765055567660
+-- 214:055666ee57777f6f55700f6656700ffe57700fff44446566044d5556004fd566
+-- 215:66555655e6656655fed66665cdfff776cdfeff65777666666756664467666440
+-- 216:007777430006667e00066667000056770000fffc0000fffc0006666700066667
+-- 217:34466670e5777000fe667000eff67000dfff0000dfff00007667700076667000
+-- 218:007777430006667e00066667000056770000fffc0000fffc0006666700066667
+-- 219:34466670e5777000fe667000eff67000dfff0000dfff00007667700076667000
+-- 220:0020000600000005000000660000202600200022000000e50000055500000555
+-- 221:556f0002555500005565744067777440667f0440567220005562000055672002
+-- 224:0447665500477777000755660006555e00065556000655660006555600007566
+-- 225:75567440777774007656700075566000e5556000e55560007555600075567000
+-- 226:0044447700744ff0006676670055556700555670005556700055557000055567
+-- 227:774444000ff44700766766007655550007655500076555000755550076555000
+-- 228:004755550047777700066667000656660006556700055567000555770006677e
+-- 229:6555740077777400765670007555600075556000755560007756600076776000
+-- 230:0000ed7700000d76000066660000655600006555000655660006556700075667
+-- 231:7777777067666670676656707765557070755560707555607066667000766770
+-- 232:0066666700655667006555770065557700555670065566700655677006566700
+-- 233:7666700076656700775557000655570007555700066555700765577000665770
+-- 234:0066666700655667006555770065557700555670065566700655677006566700
+-- 235:7666700076656700775557000655570007555700066555700765577000665770
+-- 236:0000766600007765000006650000067600000667000066660006556f0006566e
+-- 237:666702005677000055670002555600006655700055777000f6577000ef770000
+-- 240:000076670000efff0000eeef0000eeef0000eee000000ee00000eee0000eeee0
+-- 241:765670000efff0000eeef0000eeef0000eeef0000eee00000eeee0000eeee000
+-- 242:00065667000eeef0000eeef0000eeef00000ef00000eef000eeeeef0eeeffff0
+-- 243:766560000feee0000feee0000feee00000fe000000fee0000feeeee00ffffeee
+-- 244:0000677e0000eefe0000eefe0000eff00000eff0000eeef0000eeff00000ef00
+-- 245:76670000eeef0000eeff00000eff00000fff00000fffe0000fffe00000ff0000
+-- 246:00077777000feef0000feef0000eeef000feef0000feef000feeef000feeee00
+-- 247:0077677000feee0000feef0000feee00000eee00000eef00000eeef0000eeef0
+-- 248:0e667f000e667f000feee0000feee0000fee00000eee0000eeee0000eeee0000
+-- 249:00f6670000feee0000feef00000eee00000feef00000eee00000eeef0000ffff
+-- 250:0e667f000e667f000feee0000feee0000fee00000eee0000eeee0000eeee0000
+-- 251:00f6670000feee0000feef00000eee00000feef00000eee00000eeef0000ffff
+-- 252:00ff66ee00eefeee0eeefeeefeeff0eeeeef00eeeeef000eefff00000eeff000
+-- 253:eff00000e0000000f0000000ef000000ef000000ef0000000000000000000000
 -- </SPRITES>
 
 -- <MAP>

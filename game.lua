@@ -4,48 +4,8 @@
 -- script: lua
 -- input: gamepad
 
-Entity = {
-	pos_x = 0,
-	pos_y = 0,
-	dir_x = -1,
-	dir_y = 0,
-	plane_x = 0,
-	plane_y = 0.8,
-	speed_rot = 0,
-	speed_move = 0,
-}
-Entity.__index = Entity
-
-function Entity.new(pos_x, pos_y, speed_rot, speed_move)
-	local self = setmetatable({}, Entity)
-	self.pos_x = pos_x
-	self.pos_y = pos_y
-	self.speed_rot = speed_rot
-	self.speed_move = speed_move
-	return self
-end
-
-function Entity:rotate(delta)
-	local speed = self.speed_rot * delta
-	local old_dir_x = self.dir_x
-	local math_cos = math.cos
-	local math_sin = math.sin
-	self.dir_x = self.dir_x * math_cos(speed) - self.dir_y * math_sin(speed)
-	self.dir_y = old_dir_x * math_sin(speed) + self.dir_y * math_cos(speed)
-	local old_plane_x = self.plane_x
-	self.plane_x = self.plane_x * math_cos(speed) - self.plane_y * math_sin(speed)
-	self.plane_y = old_plane_x * math_sin(speed) + self.plane_y * math_cos(speed)
-end
-
-function Entity:move(delta)
-	local speed = self.speed_move * delta
-	local math_floor = math.floor
-	if mget(math_floor(self.pos_x + self.dir_x * speed), math_floor(self.pos_y)) == 0 then
-		self.pos_x = self.pos_x + self.dir_x * speed
-	end
-	if mget(math_floor(self.pos_x), math_floor(self.pos_y + self.dir_y * speed)) == 0 then
-		self.pos_y = self.pos_y + self.dir_y * speed
-	end
+function math_sign(n)
+	return n==0 and 0 or math.abs(n)/n
 end
 
 Weapon = {
@@ -53,7 +13,7 @@ Weapon = {
 	ammo = 0,
 	weapon_texture_y = 0,
 	textures_x = {},
-	up_time = 0,
+	raise_time = 0,
 	shoot_time = 0,
 	reload_time = 0,
 }
@@ -66,37 +26,68 @@ Weapon.__index = Weapon
 -- 3: shoot
 -- 4: reload
 
-function Weapon.new(ui_tex_idx, ammo, texture_y, textures_x, up_time, shoot_time, reload_time)
+function Weapon.new(ui_tex_idx, ammo, texture_y, textures_x, raise_time, shoot_time, reload_time)
 	local self = setmetatable({}, Weapon)
 	self.ui_tex_idx = ui_tex_idx
 	self.ammo = ammo
 	self.texture_y = texture_y
 	self.textures_x = textures_x
-	self.up_time = up_time
+	self.raise_time = raise_time
 	self.shoot_time = shoot_time
 	self.reload_time = reload_time
 	return self
 end
 
 Player = {
+	pos_x = 0,
+	pos_y = 0,
+	dir_x = -1,
+	dir_y = 0,
+	plane_x = 0,
+	plane_y = 0.8,
+	speed_rot = 0,
+	speed_move = 0,
 	weapon_idx = 1,
-	weapons = {
-		Weapon.new(204, 0, 107, {234, 228},      300, 100, 0), --knife
-		Weapon.new(200, 0, 113, {234, 228},      400, 100, 0), --pistol
-		Weapon.new(196, 0, 113, {222, 216, 210}, 600, 150, 200), --shotgun
-	},
 	weapon_state = 0,
 	weapon_timer = 0,
 }
-setmetatable(Player, {__index = Entity})
 Player.__index = Player
 
 function Player.new(pos_x, pos_y, speed_rot, speed_move)
-	local self = setmetatable(Entity.new(pos_x, pos_y, speed_rot, speed_move), Player)
+	local self = setmetatable({}, Player)
+	self.pos_x = pos_x
+	self.pos_y = pos_y
+	self.speed_rot = speed_rot
+	self.speed_move = speed_move
 	return self
 end
 
+function Player:rotate(delta)
+	local speed = self.speed_rot * delta
+	local old_dir_x = self.dir_x
+	local math_cos = math.cos
+	local math_sin = math.sin
+	self.dir_x = self.dir_x * math_cos(speed) - self.dir_y * math_sin(speed)
+	self.dir_y = old_dir_x * math_sin(speed) + self.dir_y * math_cos(speed)
+	local old_plane_x = self.plane_x
+	self.plane_x = self.plane_x * math_cos(speed) - self.plane_y * math_sin(speed)
+	self.plane_y = old_plane_x * math_sin(speed) + self.plane_y * math_cos(speed)
+end
+
+function Player:move(delta)
+	local speed = self.speed_move * delta
+	local math_floor = math.floor
+	if mget(math_floor(self.pos_x + self.dir_x * speed), math_floor(self.pos_y)) == 0 then
+		self.pos_x = self.pos_x + self.dir_x * speed
+	end
+	if mget(math_floor(self.pos_x), math_floor(self.pos_y + self.dir_y * speed)) == 0 then
+		self.pos_y = self.pos_y + self.dir_y * speed
+	end
+end
+
 function Player:process(delta)
+	self.weapon_timer = self.weapon_timer + delta
+
 	if btn(2) then
 		self:rotate(delta)
 	elseif btn(3) then
@@ -117,23 +108,30 @@ function Player:process(delta)
 		self.weapon_timer = 0
 	end
 
-	self.weapon_timer = self.weapon_timer + delta
-	local weapon = self.weapons[self.weapon_idx]
-	if self.weapon_state == 0 and self.weapon_timer >= weapon.up_time then
-		self.weapon_state = 2
-	elseif self.weapon_state == 1 and self.weapon_timer >= weapon.up_time then
-		self.weapon_state = 0
-		self.weapon_timer = 0
-		self.weapon_idx = self.weapon_idx % 3 + 1
-	elseif self.weapon_state == 3 and self.weapon_timer >= weapon.shoot_time then
-		if weapon.reload_time == 0 then
+	local weapon = g_WEAPONS[self.weapon_idx]
+	if self.weapon_state == 0 then
+		if self.weapon_timer >= weapon.raise_time then
 			self.weapon_state = 2
-		else
-			self.weapon_state = 4
-			self.weapon_timer = 0
 		end
-	elseif self.weapon_state == 4 and self.weapon_timer >= weapon.reload_time then
-		self.weapon_state = 2
+	elseif self.weapon_state == 1 then
+		if self.weapon_timer >= weapon.raise_time then
+			self.weapon_state = 0
+			self.weapon_timer = 0
+			self.weapon_idx = self.weapon_idx % 3 + 1
+		end
+	elseif self.weapon_state == 3 then
+		if self.weapon_timer >= weapon.shoot_time then
+			if weapon.reload_time == 0 then
+				self.weapon_state = 2
+			else
+				self.weapon_state = 4
+				self.weapon_timer = 0
+			end
+		end
+	elseif self.weapon_state == 4 then
+		if self.weapon_timer >= weapon.reload_time then
+			self.weapon_state = 2
+		end
 	end
 end
 
@@ -217,24 +215,38 @@ function Sprite:set_enemy_tex(tex_id)
 end
 
 Enemy = {
+	id = 0,
+	pos_x = 0,
+	pos_y = 0,
+	dir_x = -1,
+	dir_y = 0,
 	state = 0,
+	timer = 0,
 	tex_ids = {},
 	sprite = nil,
+	weapon = nil,
+	health = 0,
+	activate_dist_sqr = 0,
+	shoot_dist_sqr = 0,
+	die_time = 0,
+	speed_move = 0,
 }
-setmetatable(Enemy, {__index = Entity})
 Enemy.__index = Enemy
 
-g_enemy_pistol_tex_ids = {192, 194, 195, 196, 198, 200, 202, 204, 160}
+g_enemy_pistol_tex_ids = {192, 194, 195, 196, 198, 200, 202, 204, 96, 206}
+g_enemy_shotgun_tex_ids = {128, 130, 131, 132, 134, 136, 138, 140, 100, 142}
 
 -- Enemy types
 -- 0: pistol
+-- 1: shotgun
 
 -- Enemy states
 -- 0: neutral
 -- 1: raise
 -- 2: ready
 -- 3: shoot
--- 4: die
+-- 4: reload
+-- 5: die
 
 -- Enemy sprites
 -- 1: forward
@@ -246,44 +258,121 @@ g_enemy_pistol_tex_ids = {192, 194, 195, 196, 198, 200, 202, 204, 160}
 -- 7: shoot
 -- 8: die
 -- 9: corpse
+-- 10: walk
 
-function Enemy.new(type, pos_x, pos_y)
-	local self = setmetatable(Entity.new(pos_x, pos_y, 0.001, 0.003), Enemy)
+function Enemy.new(id, type, pos_x, pos_y, activate_dist, shoot_dist)
+	local self = setmetatable({}, Enemy)
+	self.id = id
+	self.pos_x = pos_x
+	self.pos_y = pos_y
+	self.activate_dist_sqr = activate_dist * activate_dist
+	self.shoot_dist_sqr = shoot_dist * shoot_dist
 	if type == 0 then
 		self.tex_ids = g_enemy_pistol_tex_ids
 		self.sprite = Sprite.new(pos_x, pos_y, 0, 1, 1.5, 0.25)
+		self.weapon = g_WEAPONS[2]
+		self.health = 70
+		self.die_time = 1000
+		self.speed_move = 0.001
+	elseif type == 1 then
+		self.tex_ids = g_enemy_shotgun_tex_ids
+		self.sprite = Sprite.new(pos_x, pos_y, 0, 1, 1.5, 0.25)
+		self.weapon = g_WEAPONS[3]
+		self.health = 130
+		self.die_time = 1000
+		self.speed_move = 0.0003
 	end
 	return self
 end
 
 function Enemy:process(delta)
 	local player = g_player
-	local player_rel_pos_x = self.pos_x - player.pos_x
-	local player_rel_pos_y = self.pos_y - player.pos_y
+	local rel_pos_x = player.pos_x - self.pos_x
+	local rel_pos_y = player.pos_y - self.pos_y
+	local dist_sqr = rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y
 	local angle = math.atan2(
-		self.dir_x * player_rel_pos_y - self.dir_y * player_rel_pos_x,
-		self.dir_x * player_rel_pos_x + self.dir_y * player_rel_pos_y)
-	local sprite = self.sprite
+		self.dir_x * rel_pos_y - self.dir_y * rel_pos_x,
+		self.dir_x * rel_pos_x + self.dir_y * rel_pos_y)
+	local abs_angle = math.abs(angle)
+
+	self.timer = self.timer + delta
 	if self.state == 0 then
-		local tex_idx
-		if angle >= 0 then
-			if angle <= 0.785398163397 then --pi / 4
-				tex_idx = 1
-			elseif angle >= 2.35619449019 then --3 * pi / 4
-				tex_idx = 4
-			else
-				tex_idx = 2
-			end
+		if abs_angle <= 0.5235988 --30 deg
+			and self.activate_dist_sqr >= dist_sqr then
+			self.state = 1
+			self.timer = 0
+			self.sprite:set_enemy_tex(self.tex_ids[5])
 		else
-			if angle >= -0.785398163397 then --pi / 4
+			local tex_idx
+			if abs_angle <= 0.785398163397 then --pi / 4
 				tex_idx = 1
-			elseif angle <= -2.35619449019 then --3 * pi / 4
+			elseif abs_angle >= 2.35619449019 then --3 * pi / 4
 				tex_idx = 4
+			elseif angle > 0 then
+				tex_idx = 2
 			else
 				tex_idx = 3
 			end
+			self.sprite:set_enemy_tex(self.tex_ids[tex_idx])
 		end
-		self.sprite:set_enemy_tex(self.tex_ids[tex_idx])
+	elseif self.state == 1 then
+		if self.timer >= self.weapon.raise_time then
+			self.state = 2
+			self.sprite:set_enemy_tex(self.tex_ids[6])
+		end
+	elseif self.state == 2 then
+		local inv_mag = 1 / math.sqrt(dist_sqr)
+		self.dir_x = rel_pos_x * inv_mag
+		self.dir_y = rel_pos_y * inv_mag
+
+		if self.shoot_dist_sqr >= dist_sqr then
+			self.state = 3
+			self.timer = 0
+			self.sprite:set_enemy_tex(self.tex_ids[7])
+		else
+			local speed = delta * self.speed_move
+			self.pos_x = self.pos_x + self.dir_x * speed
+			self.pos_y = self.pos_y + self.dir_y * speed
+			self.sprite.pos_x = self.pos_x
+			self.sprite.pos_y = self.pos_y
+			local tex_idx
+			if self.timer // 500 % 2 == 0 then
+				tex_idx = 6
+			else
+				tex_idx = 10
+			end
+			self.sprite:set_enemy_tex(self.tex_ids[tex_idx])
+		end
+	elseif self.state == 3 then
+		if self.timer >= self.weapon.shoot_time then
+			self.state = 4
+			self.timer = 0
+			self.sprite:set_enemy_tex(self.tex_ids[6])
+		end
+	elseif self.state == 4 then
+		if self.timer >= self.weapon.reload_time then
+			self.state = 2
+		end
+	elseif self.state == 5 then
+		if self.timer >= self.die_time then
+			self.sprite.tex_id = self.tex_ids[9]
+			self.sprite.scl_horiz = 1
+			self.sprite.scl_vert = 4
+			self.sprite.offset_vert = 0.75
+			table.remove(g_enemies, self.id)
+			table.insert(g_sprites, self.sprite)
+		end
+	end
+end
+
+function Enemy:damage(value)
+	if self.health > 0 then
+		self.health = self.health - value
+		if self.health <= 0 then
+			self.sprite:set_enemy_tex(self.tex_ids[8])
+			self.state = 5
+			self.timer = 0
+		end
 	end
 end
 
@@ -296,8 +385,9 @@ function init()
 	g_SCREEN_HEIGHT = 120
 	g_DEBUG = true
 	g_SPRITE_SIZES = {
-		[0]={16,16},
-		[2]={16,16},
+		[0]=  {16,16},
+		[2]=  {16,16},
+		--Enemy pistol
 		[192]={16,32},
 		[194]={8,32},
 		[195]={8,32},
@@ -306,7 +396,19 @@ function init()
 		[200]={16,32},
 		[202]={16,32},
 		[204]={16,32},
-		[160]={32,16},
+		[96]= {32,16},
+		[206]={16,32},
+		--Enemy shotgun
+		[128]={16,32},
+		[130]={8,32},
+		[131]={8,32},
+		[132]={16,32},
+		[134]={16,32},
+		[136]={16,32},
+		[138]={16,32},
+		[140]={16,32},
+		[100]={32,16},
+		[142]={16,32},
 	}
 	g_TEX_MAP = {
 		[1]=1,
@@ -323,15 +425,18 @@ function init()
 		Sprite.new(13, 13, 0, 2, 2, 0.5),
 		Sprite.new(18.5, 6.5, 2, 2, 1, 0.125),
 	}
+	g_WEAPONS = {
+		Weapon.new(204, 0, 107, {234, 228},      300, 100, 0), --knife
+		Weapon.new(200, 0, 113, {234, 228},      400, 100, 0), --pistol
+		Weapon.new(196, 0, 113, {222, 216, 210}, 600, 150, 200), --shotgun
+	}
 	g_enemies = {
-		Enemy.new(0, 17, 13),
+		[1]=Enemy.new(1, 1, 17, 13, 8, 4),
 	}
 	g_settings = {
 		floor_ceil = true,
 		interlace = 2, --disabled=g_interlace>=2
 	}
-	trace(g_player.process)
-	trace(g_enemies[1].process)
 end
 
 init()
@@ -391,7 +496,6 @@ function TIC()
 	t = t_temp
 
 	-- drawing
-
 	local inv_det = 1 / (player.plane_x * player.dir_y - player.dir_x * player.plane_y)
 	local visible_sprites = {}
 	for _,sprite in pairs(sprites) do
@@ -412,11 +516,11 @@ function TIC()
 	local num_visible_sprites = #visible_sprites
 
 	--draw weapon
-	local weapon = player.weapons[player.weapon_idx]
+	local weapon = g_WEAPONS[player.weapon_idx]
 	if player.weapon_state == 0 then
-		map(weapon.textures_x[1], weapon.texture_y, 6, 6, WEAPON_X, WEAPON_Y + 48 * (1 - player.weapon_timer / weapon.up_time))
+		map(weapon.textures_x[1], weapon.texture_y, 6, 6, WEAPON_X, WEAPON_Y + 48 * (1 - player.weapon_timer / weapon.raise_time))
 	elseif player.weapon_state == 1 then
-		map(weapon.textures_x[1], weapon.texture_y, 6, 6, WEAPON_X, WEAPON_Y + 48 * player.weapon_timer / weapon.up_time)
+		map(weapon.textures_x[1], weapon.texture_y, 6, 6, WEAPON_X, WEAPON_Y + 48 * player.weapon_timer / weapon.raise_time)
 	elseif player.weapon_state == 2 then
 		map(weapon.textures_x[1], weapon.texture_y, 6, 6, WEAPON_X, WEAPON_Y)
 	elseif player.weapon_state >= 3 then
@@ -823,11 +927,77 @@ end
 -- 017:eeeed220222222d022222dd0eeeedd20eeeed220222222d02222dd00eeee0000
 -- 018:0400000303440003000344430000000300000003000000030000033400003444
 -- 019:4000004040004430444430004000000040000000400000004440000044440000
--- 161:00000000000000000000000000000000000000000000000000eee000ddeeed00
--- 176:00000000000000000000000600044777024422ee2000eeee000eeeef000eeff0
--- 177:deeeee670666677766555555ee655556eef667ffef777feef77700ee00000000
--- 178:ff000000725600005625550066726655e7726666eff22222eeef2200eeee0000
--- 179:0000000000000000000000006600000066444000220000000000000000000000
+-- 097:00000000000000000000000000000000000000000000000000eee000ddeeed00
+-- 112:00000000000000000000000600044777024422ee2000eeee000eeeef000eeff0
+-- 113:deeeee670666677766555555ee655556eef667ffef777feef77700ee00000000
+-- 114:ff000000725600005625550066726655e7726666eff22222eeef2200eeee0000
+-- 115:0000000000000000000000006600000066444000220000000000000000000000
+-- 116:0000000000000000000044890004ee880024eee82222eee800000eef000000ee
+-- 117:000044409222222292aa22aa999a229998998288f8888222f800022200000000
+-- 118:0000000020000000aa8aa98e999f98ee888898ee8888feee0000fee200000000
+-- 119:0000000000000000e0000000e000000000000000000000000000000000000000
+-- 128:0000000000000000000000000000000a00000aaa000009990000002200000044
+-- 129:000000000000000000000000af000000fff00000ff0000002200000044000000
+-- 130:00000000000000000000000000000000000aa90000a9999000a9449900224440
+-- 131:000000000000000000000000000000000a900000aaa99000aa99990044422000
+-- 132:000000000000000000000000000000aa00000a9900000a990000004400000044
+-- 133:00000000000000000000000090000000fff00000fff000004400000044000000
+-- 134:000000000000000000000000000000000000000a00000aa90000009900000022
+-- 135:00000000000000000000000000000000a90000009ff00000ff00000022000000
+-- 136:0000000000000000000000000000000900000aa90000aa9f00000a9f00000222
+-- 137:00000000000000000000000000000000f0000000ff000000f000000020000000
+-- 138:0000000000000000000000000000000900000aa90000aa9f00000a9f00000222
+-- 139:00000000000000000000000000000000f0000000ff000000f000000020000000
+-- 142:00000000000000000000000000000000000000000000009a0000009900000002
+-- 143:00000000000000000000000000000000aaf00000a9ff00009ff0000022200000
+-- 144:0000004300000e3400aae9c10aa9e99a0a99ee99aa9998e8aa9988e8aaa9888e
+-- 145:3400000043e000001c999900aaaaaa90aa9aa9909999999988898899888888d0
+-- 146:0034444000434440000ffff000dea9900eeaa9890eaaaa980faaa99800f99998
+-- 147:4444300044434000eeef0000f99ed0009aa9ef00aa998800aa998800a9998800
+-- 148:00000044000000ff000aaaa900aaa9990aaa9999aa989998aa888988a99f888f
+-- 149:44000000ff00000098ff0000998f990098f899908f888a99f88899a9f88f9a99
+-- 150:000000440000004300000ec1000aae9900aaae9a0aaa9ee90aa988e90a9988ff
+-- 151:44000000340000001ce0000099980000a9998000aaa980009aaa980088899980
+-- 152:00000444000004330000ec11000ae89900ae88990aaee9990a99e9990a9add99
+-- 153:4000000040000000c90000009aa9000099a900009aa90000aaa90000aaaa8000
+-- 154:00000444000004330000ec11000ae89900ae88990aaee9990a99e2990a9a4332
+-- 155:4000000040000000c90000009aa9000099a900009aa90000aaa90000aaaa8000
+-- 156:0000000a000000aa02000a220000004400220de42020de44000deeff00dd9288
+-- 157:a800000298800000228002004400000044202002f29292002299299022299449
+-- 158:0000000400000994000aaffc00aa9f8800a998f800aa38ff00933d8f00943ed8
+-- 159:444000003340000011c90000999990009aaa990099aaa900f99aa900f99aa900
+-- 160:99aa33dd099a348800a44488000044ff000099880000999800009a980000aa98
+-- 161:dddddddd834443008f444000fffff00088880000899800009aa900009aa90000
+-- 162:ddf9999844a9a99844aa999800a999980aaaa9980aaa9a9800aaaa9800aaa980
+-- 163:998aaadd9888aa44a9888444a9998800aa998800aaa99800aa999000aaa98000
+-- 164:998f8fff08ffeeef000999990009a9990009aa980009aa98000aaa98000aaa98
+-- 165:888f8898ffffff009988800099988000899800009a9800009aa900009aa90000
+-- 166:0998dddd08933eee0084483400044484000a9988000aa99800aa999800aa9998
+-- 167:ddee9980eeee8800443880004488000089980000999800009a9990009aa98000
+-- 168:0aaade9909a8de890084444800844448000a988800aaa98900aa998900a99989
+-- 169:9aa980009a98800099880000888000009988000099980000aa990000aaa90000
+-- 170:0a223c3209a823290084424800844448000a988800aaa98900aa998900a99989
+-- 171:2aa980009a98800099880000888000009988000099980000aa990000aaa90000
+-- 172:9dd922284448222e44988229440092290000a998000aaa98020aaa98000aaa98
+-- 173:ff998844e888800499880000999900209aa900009aaa90009aaa902089999000
+-- 174:009448dd0000083d000009840000099400000999000009aa000009aa00000aaa
+-- 175:f89aa900d89aa900ddaa98004899800098888000a9888000a9988000a9998000
+-- 176:0000aa98000aa998000a99880000ffff000088ff0000fff0000088f0000f8ff0
+-- 177:9aa900008aa980008a998000ffff0000f88f00000f8f0000088f0000088ff000
+-- 178:00aa998000aaa99800aa99880008fff000088ff000008ff000888ff00fffffff
+-- 179:99888000a99880009888800088fff00008fff000088f000088ffff0088fffff0
+-- 180:000aa998000aaa98000099880000ffff0000ffff0000ffff00008ff0000ffff0
+-- 181:999900009aa90000899f0000ffff0000ffff0000fff800000ff800000ffff000
+-- 182:0aaaa98000a998000088888000888f8000088f000008ff800088ff000088f000
+-- 183:9aaa800099a9900089998000f88f0000f88f00000fff0000088800000888f000
+-- 184:0999908900999809008fff0f0088ff00000fff0000888f000088f00000000000
+-- 185:aaa900009998800099980000888f0000f88f00000fff0000f88f0000088ff000
+-- 186:0999908900999809008fff0f0088ff00000fff0000888f000088f00000000000
+-- 187:aaa900009998800099980000888f0000f88f00000fff0000f88f0000088ff000
+-- 188:00aaa99000aa9980008888800088f800008880000088f0000f88f0000ffff000
+-- 189:0f8ff00008888000008888f000088ff00008fff0000fff000000000000000000
+-- 190:00000aaa000009aa0000089900000888000008880000088f000008880000088f
+-- 191:aa898000a9888000ffff0000ff8f0000ff880000f0880000ff000000ff000000
 -- 192:000000dd00000dde00000d2200000d440000004300000f340000eed30006e666
 -- 193:ee000000eee0000022e0000044e000003400000043f00000366f000065556600
 -- 194:00dddd000eeeedd0022eeed004444ee00034440000444ff000dfffff0ef55667
@@ -842,6 +1012,8 @@ end
 -- 203:ee000000dde0000022e0000034e0000043000000336665002445567034466670
 -- 204:0000eee0000eeeee000eedff000edfff000efff3000efff30000003300000033
 -- 205:00000000d0000000f0000002f000002033333000344200024444420066f44000
+-- 206:0000000d000000dd000000d20000000400000004000000e300006eee000566d6
+-- 207:dde00000eeee0000222e0000444000003340000044360000e666560066655560
 -- 208:00555e65005656e60556556e056765560567f5550567feec0567ffee05676555
 -- 209:565555605655555066557550ee6675507efe7650deeef650eefff65075567650
 -- 210:0e7565670666555700e65557006e667700df657f00df555f0055557700547777
@@ -856,6 +1028,8 @@ end
 -- 219:34466670e5777000fe667000eff67000dfff0000dfff00007667700076667000
 -- 220:0020000600000005000000660000202600200022000000e50000055500000555
 -- 221:556f0002555500005565744067777440667f0440567220005562000055672002
+-- 222:000566de0005566e000555660005556d0005554d000556440000666600000666
+-- 223:66555760e66557606f665760e6f66760e6f66760fffff6606f66760076667000
 -- 224:0447665500477777000755660006555e00065556000655660006555600007566
 -- 225:75567440777774007656700075566000e5556000e55560007555600075567000
 -- 226:0044447700744ff0006676670055556700555670005556700055557000055567
@@ -870,6 +1044,8 @@ end
 -- 235:7666700076656700775557000655570007555700066555700765577000665770
 -- 236:0000766600007765000006650000067600000667000066660006556f0006566e
 -- 237:666702005677000055670002555600006655700055777000f6577000ef770000
+-- 238:0000555600005555000055770000656700000667000066670000077700000eee
+-- 239:7666670076556700655567006555600065556000655560006556700076577000
 -- 240:000076670000efff0000eeef0000eeef0000eee000000ee00000eee0000eeee0
 -- 241:765670000efff0000eeef0000eeef0000eeef0000eee00000eeee0000eeee000
 -- 242:00065667000eeef0000eeef0000eeef00000ef00000eef000eeeeef0eeeffff0
@@ -884,6 +1060,8 @@ end
 -- 251:00f6670000feee0000feef00000eee00000feef00000eee00000eeef0000ffff
 -- 252:00ff66ee00eefeee0eeefeeefeeff0eeeeef00eeeeef000eefff00000eeff000
 -- 253:eff00000e0000000f0000000ef000000ef000000ef0000000000000000000000
+-- 254:000000ff000000ee000000ee000000ee000000ee000000000000000000000000
+-- 255:77676000f7667000feeff000feee00000eee00000eef0000eeee0000eeee0000
 -- </SPRITES>
 
 -- <MAP>
@@ -1073,3 +1251,4 @@ end
 -- <PALETTE>
 -- 000:1a1c2c5d275db13e53ef7d57ffcd75a7f07038b76425717929366f3b5dc941a6f673eff7f4f4f494b0c2566c86333c57
 -- </PALETTE>
+

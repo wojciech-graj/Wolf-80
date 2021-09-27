@@ -4,10 +4,6 @@
 -- script: lua
 -- input: gamepad
 
-function math_sign(n)
-	return n==0 and 0 or math.abs(n)/n
-end
-
 Weapon = {
 	ui_tex_idx = 0,
 	ammo = 0,
@@ -16,6 +12,11 @@ Weapon = {
 	raise_time = 0,
 	shoot_time = 0,
 	reload_time = 0,
+	double_spread_angle = 0,
+	min_dmg = 0,
+	max_dmg = 0,
+	n_pellets = 0,
+	range_sqr = 0,
 }
 Weapon.__index = Weapon
 
@@ -26,7 +27,7 @@ Weapon.__index = Weapon
 -- 3: shoot
 -- 4: reload
 
-function Weapon.new(ui_tex_idx, ammo, texture_y, textures_x, raise_time, shoot_time, reload_time)
+function Weapon.new(ui_tex_idx, ammo, texture_y, textures_x, raise_time, shoot_time, reload_time, spread_angle, min_dmg, max_dmg, n_pellets, range)
 	local self = setmetatable({}, Weapon)
 	self.ui_tex_idx = ui_tex_idx
 	self.ammo = ammo
@@ -35,7 +36,116 @@ function Weapon.new(ui_tex_idx, ammo, texture_y, textures_x, raise_time, shoot_t
 	self.raise_time = raise_time
 	self.shoot_time = shoot_time
 	self.reload_time = reload_time
+	self.double_spread_angle = spread_angle * 2
+	self.min_dmg = min_dmg
+	self.max_dmg = max_dmg
+	self.n_pellets = n_pellets
+	self.range_sqr = range * range
 	return self
+end
+
+function g_ray_entity_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, hitbox_rad)
+	if rel_pos_x * dir_x > 0 and rel_pos_y * dir_y > 0 then --in front
+		local dist_perp = rel_pos_x / dir_x - rel_pos_y / dir_y
+		if math.abs(dist_perp) < hitbox_rad then
+			return true
+		end
+	end
+	return false
+end
+
+-- Target Types
+-- 0: Player
+-- 1: Enemies
+function Weapon:shoot(entity, target_type)
+	local math_cos = math.cos
+	local math_sin = math.sin
+	local math_random = math.random
+	local math_floor = math.floor
+	local math_abs = math.abs
+	local ray_entity_collides = g_ray_entity_collides
+
+	self.ammo = self.ammo - 1
+
+	for _=1,self.n_pellets do
+		local angle = (math_random() - 0.5) * self.double_spread_angle
+		local dir_x = entity.dir_x * math_cos(angle) - entity.dir_y * math_sin(angle)
+		local dir_y = entity.dir_x * math_sin(angle) + entity.dir_y * math_cos(angle)
+		local damage = math_floor(math_random(self.min_dmg, self.max_dmg))
+
+		local map_x = math_floor(entity.pos_x)
+		local map_y = math_floor(entity.pos_y)
+		local delta_dist_x = math_abs(1 / dir_x)
+		local delta_dist_y = math_abs(1 / dir_y)
+
+		local step_x
+		local side_dist_x
+		if dir_x < 0 then
+			step_x = -1
+			side_dist_x = (entity.pos_x - map_x) * delta_dist_x
+		else
+			step_x = 1
+			side_dist_x = (map_x + 1.0 - entity.pos_x) * delta_dist_x
+		end
+
+		local step_y
+		local side_dist_y
+		if dir_y < 0 then
+			step_y = -1
+			side_dist_y = (entity.pos_y - map_y) * delta_dist_y
+		else
+			step_y = 1
+			side_dist_y = (map_y + 1.0 - entity.pos_y) * delta_dist_y
+		end
+
+		local wall_dist = 0
+		while true do
+			if side_dist_x < side_dist_y then
+				side_dist_x = side_dist_x + delta_dist_x
+				map_x = map_x + step_x
+				wall_dist = wall_dist + delta_dist_x
+			else
+				side_dist_y = side_dist_y + delta_dist_y
+				map_y = map_y + step_y
+				wall_dist = wall_dist + delta_dist_y
+			end
+			tile_data = mget(map_x, map_y)
+			if tile_data > 0 then
+				if tile_data // 16 < 8 then --if more than half-height
+					break
+				end
+			end
+		end
+		local max_dist_sqr = math.min(wall_dist * wall_dist, self.range_sqr)
+
+		if target_type == 0 then
+			local player = g_player
+			local rel_pos_x = player.pos_x - entity.pos_x
+			local rel_pos_y = player.pos_y - entity.pos_y
+			local dist_sqr = rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y
+			if dist_sqr < max_dist_sqr
+				and ray_entity_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, player.hitbox_rad) then
+				player:damage(damage)
+			end
+		else --target_type == 1
+			local enemies = g_enemies
+			local closest_enemy
+			local closest_enemy_dist_sqr = 9999
+			for _,enemy in pairs(enemies) do
+				local rel_pos_x = enemy.pos_x - entity.pos_x
+				local rel_pos_y = enemy.pos_y - entity.pos_y
+				local dist_sqr = rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y
+				if closest_enemy_dist_sqr > dist_sqr
+					and ray_entity_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, enemy.hitbox_rad) then
+					closest_enemy = enemy
+					closest_enemy_dist_sqr = dist_sqr
+				end
+			end
+			if closest_enemy_dist_sqr < max_dist_sqr then
+				closest_enemy:damage(damage)
+			end
+		end
+	end
 end
 
 Player = {
@@ -45,20 +155,20 @@ Player = {
 	dir_y = 0,
 	plane_x = 0,
 	plane_y = 0.8,
-	speed_rot = 0,
-	speed_move = 0,
+	speed_rot = 0.0015,
+	speed_move = 0.003,
 	weapon_idx = 1,
 	weapon_state = 0,
 	weapon_timer = 0,
+	health = 100,
+	hitbox_rad = 0.4,
 }
 Player.__index = Player
 
-function Player.new(pos_x, pos_y, speed_rot, speed_move)
+function Player.new(pos_x, pos_y)
 	local self = setmetatable({}, Player)
 	self.pos_x = pos_x
 	self.pos_y = pos_y
-	self.speed_rot = speed_rot
-	self.speed_move = speed_move
 	return self
 end
 
@@ -85,8 +195,14 @@ function Player:move(delta)
 	end
 end
 
+function Player:damage(value)
+	self.health = self.health - value
+end
+
 function Player:process(delta)
 	self.weapon_timer = self.weapon_timer + delta
+
+	local weapon = g_WEAPONS[self.weapon_idx]
 
 	if btn(2) then
 		self:rotate(delta)
@@ -103,12 +219,12 @@ function Player:process(delta)
 			self.weapon_state = 1
 			self.weapon_timer = 0
 		end
-	elseif btnp(6) and self.weapon_state == 2 then
+	elseif btnp(6) and self.weapon_state == 2 and weapon.ammo > 0 then
 		self.weapon_state = 3
 		self.weapon_timer = 0
+		weapon:shoot(self, 1)
 	end
 
-	local weapon = g_WEAPONS[self.weapon_idx]
 	if self.weapon_state == 0 then
 		if self.weapon_timer >= weapon.raise_time then
 			self.weapon_state = 2
@@ -230,6 +346,7 @@ Enemy = {
 	shoot_dist_sqr = 0,
 	die_time = 0,
 	speed_move = 0,
+	hitbox_rad = 0,
 }
 Enemy.__index = Enemy
 
@@ -270,17 +387,19 @@ function Enemy.new(id, type, pos_x, pos_y, activate_dist, shoot_dist)
 	if type == 0 then
 		self.tex_ids = g_enemy_pistol_tex_ids
 		self.sprite = Sprite.new(pos_x, pos_y, 0, 1, 1.5, 0.25)
-		self.weapon = g_WEAPONS[2]
+		self.weapon = g_ENEMY_WEAPONS[1]
 		self.health = 70
 		self.die_time = 1000
 		self.speed_move = 0.001
+		self.hitbox_rad = 0.4
 	elseif type == 1 then
 		self.tex_ids = g_enemy_shotgun_tex_ids
 		self.sprite = Sprite.new(pos_x, pos_y, 0, 1, 1.5, 0.25)
-		self.weapon = g_WEAPONS[3]
+		self.weapon = g_ENEMY_WEAPONS[2]
 		self.health = 130
 		self.die_time = 1000
 		self.speed_move = 0.0003
+		self.hitbox_rad = 0.4
 	end
 	return self
 end
@@ -289,7 +408,7 @@ function Enemy:process(delta)
 	local player = g_player
 	local rel_pos_x = player.pos_x - self.pos_x
 	local rel_pos_y = player.pos_y - self.pos_y
-	local dist_sqr = rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y
+	self.dist_sqr = rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y
 	local angle = math.atan2(
 		self.dir_x * rel_pos_y - self.dir_y * rel_pos_x,
 		self.dir_x * rel_pos_x + self.dir_y * rel_pos_y)
@@ -298,7 +417,7 @@ function Enemy:process(delta)
 	self.timer = self.timer + delta
 	if self.state == 0 then
 		if abs_angle <= 0.5235988 --30 deg
-			and self.activate_dist_sqr >= dist_sqr then
+			and self.activate_dist_sqr >= self.dist_sqr then
 			self.state = 1
 			self.timer = 0
 			self.sprite:set_enemy_tex(self.tex_ids[5])
@@ -321,13 +440,14 @@ function Enemy:process(delta)
 			self.sprite:set_enemy_tex(self.tex_ids[6])
 		end
 	elseif self.state == 2 then
-		local inv_mag = 1 / math.sqrt(dist_sqr)
+		local inv_mag = 1 / math.sqrt(self.dist_sqr)
 		self.dir_x = rel_pos_x * inv_mag
 		self.dir_y = rel_pos_y * inv_mag
 
-		if self.shoot_dist_sqr >= dist_sqr then
+		if self.shoot_dist_sqr >= self.dist_sqr then
 			self.state = 3
 			self.timer = 0
+			self.weapon:shoot(self, 0)
 			self.sprite:set_enemy_tex(self.tex_ids[7])
 		else
 			local speed = delta * self.speed_move
@@ -376,7 +496,7 @@ function Enemy:damage(value)
 	end
 end
 
-function get_tex_pixel(offset, id, x, y)
+function g_get_tex_pixel(offset, id, x, y)
 	return peek4(offset + 0x40 * (id + 16 * (y // 8) + x // 8) + 0x8 * (y % 8) + (x % 8))
 end
 
@@ -417,7 +537,7 @@ function init()
 		[4]=7,
 		[5]=9,
 	}
-	g_player = Player.new(22, 12, 0.001, 0.003)
+	g_player = Player.new(22, 12)
 	g_prev_time = 0
 	g_sprites = {
 		Sprite.new(12, 13, 0, 2, 2, 0.5),
@@ -426,12 +546,16 @@ function init()
 		Sprite.new(18.5, 6.5, 2, 2, 1, 0.125),
 	}
 	g_WEAPONS = {
-		Weapon.new(204, 0, 107, {234, 228},      300, 100, 0), --knife
-		Weapon.new(200, 0, 113, {234, 228},      400, 100, 0), --pistol
-		Weapon.new(196, 0, 113, {222, 216, 210}, 600, 150, 200), --shotgun
+		Weapon.new(204, 99999999, 107, {234, 228},      300, 100, 0  , 0.005, 2, 20 , 1, 1),
+		Weapon.new(200, 50      , 113, {234, 228},      400, 100, 0  , 0.01 , 5, 15 , 1, 32),
+		Weapon.new(196, 20      , 113, {222, 216, 210}, 600, 150, 200, 0.01 , 5, 105, 7, 32),
+	}
+	g_ENEMY_WEAPONS = {
+		Weapon.new(0, 99999999, 0, nil, 400, 100, 0  , 0.4, 3, 15, 1, 32),
+		Weapon.new(0, 99999999, 0, nil, 600, 150, 200, 0.4, 3, 45, 3, 32),
 	}
 	g_enemies = {
-		[1]=Enemy.new(1, 1, 17, 13, 8, 4),
+		[1]=Enemy.new(1, 1, 16.8, 13, 8, 4),
 	}
 	g_settings = {
 		floor_ceil = true,
@@ -458,6 +582,7 @@ function TIC()
 	local settings = g_settings
 	local WEAPON_X = 104
 	local WEAPON_Y = 72
+	local get_tex_pixel = g_get_tex_pixel
 	local math_floor = math.floor
 	local math_abs = math.abs
 
@@ -530,6 +655,7 @@ function TIC()
 	-- draw HUD
 	map(210, 134, 26, 2, 0, 120)
 	map(236, 128 + 2 * player.weapon_idx, 4, 2, 208, 120)
+	print(player.health, 24, 120, 11)
 
 	-- draw walls and sprites
 	for x=start_vline,SCREEN_WIDTH-1,step_vline do
@@ -671,7 +797,7 @@ function TIC()
 						local row_distance = row_distance_part / (y - SCREEN_HALF_HEIGHT)
 						local floor_x = player.pos_x + row_distance * ray_dir_x
 						local floor_y = player.pos_y + row_distance * ray_dir_y
-						local tex_x = math_floor(TEX_WIDTH * floor_x) % TEX_WIDTH
+						tex_x = math_floor(TEX_WIDTH * floor_x) % TEX_WIDTH
 						local tex_y = math_floor(TEX_HEIGHT * floor_y) % TEX_HEIGHT
 						pix(x, y, get_tex_pixel(0x8000, tex_id, tex_x, tex_y))
 					end
@@ -1077,9 +1203,9 @@ end
 -- 009:1000005d1a5616561a5d0000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 010:1000001d5a1a5a1a5a1d0000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 011:1000005d1d5d1d5d1d5d0000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
--- 012:100000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
--- 013:100000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
--- 014:100000500050005000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+-- 012:100000000000000000000000000000000010000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+-- 013:100000000000000000000000000000000010000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+-- 014:100000500050005000000000000000000010000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 015:100000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 016:100000500050005000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 017:100000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -1251,4 +1377,3 @@ end
 -- <PALETTE>
 -- 000:1a1c2c5d275db13e53ef7d57ffcd75a7f07038b76425717929366f3b5dc941a6f673eff7f4f4f494b0c2566c86333c57
 -- </PALETTE>
-

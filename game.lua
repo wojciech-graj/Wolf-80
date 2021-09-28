@@ -19,14 +19,16 @@ function g_entity_move(self, speed)
 	local math_min = math.min
 	local math_max = math.max
 
+	local sign_speed = math_sign(speed)
+
 	if mget(
-		math_max(math_min(math_floor(self.pos_x + self.dir_x * speed + math_sign(self.dir_x) * 0.25), g_LEVEL_WIDTH - 1), 0),
+		math_max(math_min(math_floor(self.pos_x + self.dir_x * speed + sign_speed * math_sign(self.dir_x) * 0.25), g_LEVEL_WIDTH - 1), 0),
 		math_floor(self.pos_y)) == 0 then
 		self.pos_x = self.pos_x + self.dir_x * speed
 	end
 	if mget(
 		math_floor(self.pos_x),
-		math_max(math_min(math_floor(self.pos_y + self.dir_y * speed + math_sign(self.dir_y) * 0.25), g_LEVEL_HEIGHT - 1), 0)) == 0 then
+		math_max(math_min(math_floor(self.pos_y + self.dir_y * speed + sign_speed * math_sign(self.dir_y) * 0.25), g_LEVEL_HEIGHT - 1), 0)) == 0 then
 		self.pos_y = self.pos_y + self.dir_y * speed
 	end
 end
@@ -72,9 +74,9 @@ function Weapon.new(ui_tex_idx, ammo, texture_y, textures_x, raise_time, shoot_t
 end
 
 function g_ray_entity_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, hitbox_rad)
-	if rel_pos_x * dir_x > 0 and rel_pos_y * dir_y > 0 then --in front
-		local dist_perp = rel_pos_x / dir_x - rel_pos_y / dir_y
-		if math.abs(dist_perp) < hitbox_rad then
+	if (rel_pos_x * dir_x + rel_pos_y * dir_y) / math.sqrt(rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y) > 0 then --in front
+		local dist_perp = math.abs(dir_x * rel_pos_y - dir_y * rel_pos_x)
+		if dist_perp < hitbox_rad then
 			return true
 		end
 	end
@@ -126,29 +128,36 @@ function Weapon:shoot(entity, target_type)
 		end
 
 		-- DDA
+		local side
 		while true do
 			if side_dist_x < side_dist_y then
 				side_dist_x = side_dist_x + delta_dist_x
 				map_x = map_x + step_x
+				side = 0
 			else
 				side_dist_y = side_dist_y + delta_dist_y
 				map_y = map_y + step_y
+				side = 1
 			end
 			tile_data = mget(map_x, map_y)
-			if tile_data > 0
+			if tile_data > 0 then
 				and tile_data // 16 < 8 then --if more than half-height
 				break
 			end
 		end
 
-		local perp_wall_dist
+		local wall_dist_sqr
 		if side == 0 then
-			perp_wall_dist = (map_x - entity.pos_x + (1 - step_x) * 0.5) / dir_x
+			local dist_x = side_dist_x - delta_dist_x
+			local dist_y = dist_x * dir_y / dir_x
+			wall_dist_sqr = dist_x * dist_x + dist_y * dist_y
 		else
-			perp_wall_dist = (map_y - entity.pos_y + (1 - step_y) * 0.5) / dir_y
+			local dist_y = side_dist_y - delta_dist_y
+			local dist_x = dist_y * dir_x / dir_y
+			wall_dist_sqr = dist_x * dist_x + dist_y * dist_y
 		end
 
-		local max_dist_sqr = math.min(perp_wall_dist, self.range_sqr)
+		local max_dist_sqr = math.min(wall_dist_sqr, self.range_sqr)
 
 		if target_type == 0 then
 			local player = g_player
@@ -524,15 +533,19 @@ function Enemy:process(delta)
 				break
 			end
 		end
-		local perp_wall_dist
+		local wall_dist_sqr
 		if side == 0 then
-			perp_wall_dist = (map_x - self.pos_x + (1 - step_x) * 0.5) / self.dir_x
+			local dist_x = side_dist_x - delta_dist_x
+			local dist_y = dist_x * self.dir_y / self.dir_x
+			wall_dist_sqr = dist_x * dist_x + dist_y * dist_y
 		else
-			perp_wall_dist = (map_y - self.pos_y + (1 - step_y) * 0.5) / self.dir_y
+			local dist_y = side_dist_y - delta_dist_y
+			local dist_x = dist_y * self.dir_x / self.dir_y
+			wall_dist_sqr = dist_x * dist_x + dist_y * dist_y
 		end
 
 		if self.shoot_dist_sqr < self.dist_sqr --player too far
-			or perp_wall_dist * perp_wall_dist < self.dist_sqr then --player not visible
+			or wall_dist_sqr < self.dist_sqr then --player not visible
 			self:move(self.speed_move * delta)
 
 			local tex_idx
@@ -825,9 +838,9 @@ function TIC()
 
 			local perp_wall_dist
 			if side == 0 then
-				perp_wall_dist = (map_x - player.pos_x + (1 - step_x) * 0.5) / ray_dir_x
+				perp_wall_dist = side_dist_x - delta_dist_x
 			else
-				perp_wall_dist = (map_y - player.pos_y + (1 - step_y) * 0.5) / ray_dir_y
+				perp_wall_dist = side_dist_y - delta_dist_y
 			end
 
 			--draw sprites

@@ -4,6 +4,33 @@
 -- script: lua
 -- input: gamepad
 
+--TODO:
+--pickups
+--doors
+--hitmarkers
+
+function g_math_sign(x)
+	return x>0 and 1 or x<0 and -1 or 0
+end
+
+function g_entity_move(self, speed)
+	local math_floor = math.floor
+	local math_sign = g_math_sign
+	local math_min = math.min
+	local math_max = math.max
+
+	if mget(
+		math_max(math_min(math_floor(self.pos_x + self.dir_x * speed + math_sign(self.dir_x) * 0.25), g_LEVEL_WIDTH - 1), 0),
+		math_floor(self.pos_y)) == 0 then
+		self.pos_x = self.pos_x + self.dir_x * speed
+	end
+	if mget(
+		math_floor(self.pos_x),
+		math_max(math_min(math_floor(self.pos_y + self.dir_y * speed + math_sign(self.dir_y) * 0.25), g_LEVEL_HEIGHT - 1), 0)) == 0 then
+		self.pos_y = self.pos_y + self.dir_y * speed
+	end
+end
+
 Weapon = {
 	ui_tex_idx = 0,
 	ammo = 0,
@@ -98,25 +125,30 @@ function Weapon:shoot(entity, target_type)
 			side_dist_y = (map_y + 1.0 - entity.pos_y) * delta_dist_y
 		end
 
-		local wall_dist = 0
+		-- DDA
 		while true do
 			if side_dist_x < side_dist_y then
 				side_dist_x = side_dist_x + delta_dist_x
 				map_x = map_x + step_x
-				wall_dist = wall_dist + delta_dist_x
 			else
 				side_dist_y = side_dist_y + delta_dist_y
 				map_y = map_y + step_y
-				wall_dist = wall_dist + delta_dist_y
 			end
 			tile_data = mget(map_x, map_y)
-			if tile_data > 0 then
-				if tile_data // 16 < 8 then --if more than half-height
-					break
-				end
+			if tile_data > 0
+				and tile_data // 16 < 8 then --if more than half-height
+				break
 			end
 		end
-		local max_dist_sqr = math.min(wall_dist * wall_dist, self.range_sqr)
+
+		local perp_wall_dist
+		if side == 0 then
+			perp_wall_dist = (map_x - entity.pos_x + (1 - step_x) * 0.5) / dir_x
+		else
+			perp_wall_dist = (map_y - entity.pos_y + (1 - step_y) * 0.5) / dir_y
+		end
+
+		local max_dist_sqr = math.min(perp_wall_dist, self.range_sqr)
 
 		if target_type == 0 then
 			local player = g_player
@@ -162,6 +194,7 @@ Player = {
 	weapon_timer = 0,
 	health = 100,
 	hitbox_rad = 0.4,
+	move = g_entity_move,
 }
 Player.__index = Player
 
@@ -184,17 +217,6 @@ function Player:rotate(delta)
 	self.plane_y = old_plane_x * math_sin(speed) + self.plane_y * math_cos(speed)
 end
 
-function Player:move(delta)
-	local speed = self.speed_move * delta
-	local math_floor = math.floor
-	if mget(math_floor(self.pos_x + self.dir_x * speed), math_floor(self.pos_y)) == 0 then
-		self.pos_x = self.pos_x + self.dir_x * speed
-	end
-	if mget(math_floor(self.pos_x), math_floor(self.pos_y + self.dir_y * speed)) == 0 then
-		self.pos_y = self.pos_y + self.dir_y * speed
-	end
-end
-
 function Player:damage(value)
 	self.health = self.health - value
 end
@@ -210,9 +232,9 @@ function Player:process(delta)
 		self:rotate(-delta)
 	end
 	if btn(0) then
-		self:move(delta)
+		self:move(self.speed_move * delta)
 	elseif btn(1) then
-		self:move(-delta)
+		self:move(-self.speed_move * delta)
 	end
 	if btnp(4) then
 		if self.weapon_state == 2 then
@@ -347,11 +369,13 @@ Enemy = {
 	die_time = 0,
 	speed_move = 0,
 	hitbox_rad = 0,
+	pain_time = 0,
+	pain_chance = 0,
 }
 Enemy.__index = Enemy
 
-g_enemy_pistol_tex_ids = {192, 194, 195, 196, 198, 200, 202, 204, 96, 206}
-g_enemy_shotgun_tex_ids = {128, 130, 131, 132, 134, 136, 138, 140, 100, 142}
+g_enemy_pistol_tex_ids = {192, 194, 195, 196, 198, 200, 202, 204, 96, 206, 76}
+g_enemy_shotgun_tex_ids = {128, 130, 131, 132, 134, 136, 138, 140, 100, 142, 78}
 
 -- Enemy types
 -- 0: pistol
@@ -364,26 +388,28 @@ g_enemy_shotgun_tex_ids = {128, 130, 131, 132, 134, 136, 138, 140, 100, 142}
 -- 3: shoot
 -- 4: reload
 -- 5: die
+-- 6: hurt
 
 -- Enemy sprites
--- 1: forward
--- 2: left
--- 3: right
--- 4: back
--- 5: raise
--- 6: ready
--- 7: shoot
--- 8: die
--- 9: corpse
+-- 01: forward
+-- 02: left
+-- 03: right
+-- 04: back
+-- 05: raise
+-- 06: ready
+-- 07: shoot
+-- 08: die
+-- 09: corpse
 -- 10: walk
+-- 11: pain
 
-function Enemy.new(id, type, pos_x, pos_y, activate_dist, shoot_dist)
+function Enemy.new(id, type, pos_x, pos_y)
 	local self = setmetatable({}, Enemy)
 	self.id = id
 	self.pos_x = pos_x
 	self.pos_y = pos_y
-	self.activate_dist_sqr = activate_dist * activate_dist
-	self.shoot_dist_sqr = shoot_dist * shoot_dist
+	self.activate_dist_sqr = 64
+	self.shoot_dist_sqr = 16
 	if type == 0 then
 		self.tex_ids = g_enemy_pistol_tex_ids
 		self.sprite = Sprite.new(pos_x, pos_y, 0, 1, 1.5, 0.25)
@@ -392,6 +418,8 @@ function Enemy.new(id, type, pos_x, pos_y, activate_dist, shoot_dist)
 		self.die_time = 1000
 		self.speed_move = 0.001
 		self.hitbox_rad = 0.4
+		self.pain_time = 170
+		self.pain_chance = 0.7
 	elseif type == 1 then
 		self.tex_ids = g_enemy_shotgun_tex_ids
 		self.sprite = Sprite.new(pos_x, pos_y, 0, 1, 1.5, 0.25)
@@ -400,8 +428,16 @@ function Enemy.new(id, type, pos_x, pos_y, activate_dist, shoot_dist)
 		self.die_time = 1000
 		self.speed_move = 0.0003
 		self.hitbox_rad = 0.4
+		self.pain_time = 210
+		self.pain_chance = 0.61
 	end
 	return self
+end
+
+function Enemy:move(speed)
+	g_entity_move(self, speed)
+	self.sprite.pos_x = self.pos_x
+	self.sprite.pos_y = self.pos_y
 end
 
 function Enemy:process(delta)
@@ -416,8 +452,9 @@ function Enemy:process(delta)
 
 	self.timer = self.timer + delta
 	if self.state == 0 then
-		if abs_angle <= 0.5235988 --30 deg
-			and self.activate_dist_sqr >= self.dist_sqr then
+		if self.dist_sqr <= 1
+			or (abs_angle <= 0.5235988 --30 deg
+			and self.activate_dist_sqr >= self.dist_sqr) then
 			self.state = 1
 			self.timer = 0
 			self.sprite:set_enemy_tex(self.tex_ids[5])
@@ -440,28 +477,76 @@ function Enemy:process(delta)
 			self.sprite:set_enemy_tex(self.tex_ids[6])
 		end
 	elseif self.state == 2 then
+		local math_floor = math.floor
+		local math_abs = math.abs
+
 		local inv_mag = 1 / math.sqrt(self.dist_sqr)
 		self.dir_x = rel_pos_x * inv_mag
 		self.dir_y = rel_pos_y * inv_mag
 
-		if self.shoot_dist_sqr >= self.dist_sqr then
-			self.state = 3
-			self.timer = 0
-			self.weapon:shoot(self, 0)
-			self.sprite:set_enemy_tex(self.tex_ids[7])
+		local map_x = math_floor(self.pos_x)
+		local map_y = math_floor(self.pos_y)
+		local delta_dist_x = math_abs(1 / self.dir_x)
+		local delta_dist_y = math_abs(1 / self.dir_y)
+
+		local step_x
+		local side_dist_x
+		if self.dir_x < 0 then
+			step_x = -1
+			side_dist_x = (self.pos_x - map_x) * delta_dist_x
 		else
-			local speed = delta * self.speed_move
-			self.pos_x = self.pos_x + self.dir_x * speed
-			self.pos_y = self.pos_y + self.dir_y * speed
-			self.sprite.pos_x = self.pos_x
-			self.sprite.pos_y = self.pos_y
+			step_x = 1
+			side_dist_x = (map_x + 1.0 - self.pos_x) * delta_dist_x
+		end
+
+		local step_y
+		local side_dist_y
+		if self.dir_y < 0 then
+			step_y = -1
+			side_dist_y = (self.pos_y - map_y) * delta_dist_y
+		else
+			step_y = 1
+			side_dist_y = (map_y + 1.0 - self.pos_y) * delta_dist_y
+		end
+
+		-- DDA LOS check
+		while true do
+			if side_dist_x < side_dist_y then
+				side_dist_x = side_dist_x + delta_dist_x
+				map_x = map_x + step_x
+			else
+				side_dist_y = side_dist_y + delta_dist_y
+				map_y = map_y + step_y
+			end
+			tile_data = mget(map_x, map_y)
+			if tile_data > 0
+				and tile_data // 16 < 8 then --if more than half-height
+				break
+			end
+		end
+		local perp_wall_dist
+		if side == 0 then
+			perp_wall_dist = (map_x - self.pos_x + (1 - step_x) * 0.5) / self.dir_x
+		else
+			perp_wall_dist = (map_y - self.pos_y + (1 - step_y) * 0.5) / self.dir_y
+		end
+
+		if self.shoot_dist_sqr < self.dist_sqr --player too far
+			or perp_wall_dist * perp_wall_dist < self.dist_sqr then --player not visible
+			self:move(self.speed_move * delta)
+
 			local tex_idx
-			if self.timer // 500 % 2 == 0 then
+			if self.timer // 500 % 2 == 0 then --TODO:un-hardcode
 				tex_idx = 6
 			else
 				tex_idx = 10
 			end
 			self.sprite:set_enemy_tex(self.tex_ids[tex_idx])
+		else
+			self.state = 3
+			self.timer = 0
+			self.weapon:shoot(self, 0)
+			self.sprite:set_enemy_tex(self.tex_ids[7])
 		end
 	elseif self.state == 3 then
 		if self.timer >= self.weapon.shoot_time then
@@ -482,6 +567,11 @@ function Enemy:process(delta)
 			table.remove(g_enemies, self.id)
 			table.insert(g_sprites, self.sprite)
 		end
+	elseif self.state == 6 then
+		if self.timer >= self.pain_time then
+			self.state = 2
+			self.sprite:set_enemy_tex(self.tex_ids[6])
+		end
 	end
 end
 
@@ -492,6 +582,16 @@ function Enemy:damage(value)
 			self.sprite:set_enemy_tex(self.tex_ids[8])
 			self.state = 5
 			self.timer = 0
+		else
+			if (not (self.state == 6))
+				and math.random() < self.pain_chance then
+				self.state = 6
+				self.timer = 0
+				self.sprite:set_enemy_tex(self.tex_ids[11])
+			elseif self.state == 0 then
+				self.state = 2
+				self.sprite:set_enemy_tex(self.tex_ids[6])
+			end
 		end
 	end
 end
@@ -503,6 +603,8 @@ end
 function init()
 	g_SCREEN_WIDTH = 240
 	g_SCREEN_HEIGHT = 120
+	g_LEVEL_WIDTH = 24
+	g_LEVEL_HEIGHT = 24
 	g_DEBUG = true
 	g_SPRITE_SIZES = {
 		[0]=  {16,16},
@@ -518,6 +620,7 @@ function init()
 		[204]={16,32},
 		[96]= {32,16},
 		[206]={16,32},
+		[76]= {16,32},
 		--Enemy shotgun
 		[128]={16,32},
 		[130]={8,32},
@@ -529,6 +632,7 @@ function init()
 		[140]={16,32},
 		[100]={32,16},
 		[142]={16,32},
+		[78]= {16,32},
 	}
 	g_TEX_MAP = {
 		[1]=1,
@@ -555,12 +659,14 @@ function init()
 		Weapon.new(0, 99999999, 0, nil, 600, 150, 200, 0.4, 3, 45, 3, 32),
 	}
 	g_enemies = {
-		[1]=Enemy.new(1, 1, 16.8, 13, 8, 4),
+		[1]=Enemy.new(1, 1, 16.6, 13),
 	}
 	g_settings = {
 		floor_ceil = true,
 		interlace = 2, --disabled=g_interlace>=2
 	}
+
+	math.randomseed(tstamp())
 end
 
 init()
@@ -580,7 +686,7 @@ function TIC()
 	local sprites = g_sprites
 	local enemies = g_enemies
 	local settings = g_settings
-	local WEAPON_X = 104
+	local WEAPON_X = 111
 	local WEAPON_Y = 72
 	local get_tex_pixel = g_get_tex_pixel
 	local math_floor = math.floor
@@ -664,7 +770,6 @@ function TIC()
 	end
 	font(weapon_ammo, 69, 124)
 
-
 	-- draw walls and sprites
 	for x=start_vline,SCREEN_WIDTH-1,step_vline do
 		local camera_x = 2 * x / SCREEN_WIDTH - 1
@@ -699,7 +804,7 @@ function TIC()
 		local not_hit_full_wall = true
 		local prev_draw_start = SCREEN_HEIGHT
 		while not_hit_full_wall do
-			-- Get next wall tile using DDA
+			-- DDA
 			local side
 			local tile_data
 			while true do
@@ -980,7 +1085,7 @@ end
 -- 183:003333330333333303333333f3333333ff3333330f3333330033333300033333
 -- 184:3777777737777777333777773337777733337777333377773333777733337777
 -- 185:0000000070000000770000007777000077777000777777007777444077444440
--- 186:3344444d3334444d033344fd033334fd0033333d0000333d0000033d0000000f
+-- 186:3344444d3334444d033344ed033334ed0033333d0000333d0000033d0000000f
 -- 187:ccccdeeeddcccceedddeedceccdddedddcccddefddccceefeeecdddeeeeffddd
 -- 188:0044444700044447004444470044444400444444000444440004444400044444
 -- 189:7777777777777777777777777777777777777777777777744777774447777444
@@ -1072,7 +1177,19 @@ end
 -- 056:0fff0000fffff000ff0ff000fffff000fffff000ff0ff000fffff0000fff0000
 -- 057:0fff0000fffff000ff0ff000fffff0000ffff000000ff0000ffff0000fff0000
 -- 058:000000000ffffff0ffffffffff0ff0ffffffffff0ffffff00000000000000000
+-- 076:000dddd0000deeee00deeeee000244ee20044444002244462000046500000e65
+-- 077:000000000000000000000000e000000065000000555500005555550055576650
+-- 078:00000000000000000000000000000000000000000000000a020000aa0000000a
+-- 079:0000000000000000000000000000000000000000a90000009fff00009ff00020
+-- 092:00000e6500005e66000056e60005567e000560660055606e0055606605560067
+-- 093:555776556556706566667065e6667044fff77044eefff0006667700066666000
+-- 094:000000020000200402000004000aaeec00aaaafa0aaa99f9aaa8999faaaa3eee
+-- 095:22200000444020003340002011c00000a9990000aaa99900aa99999099988990
 -- 097:00000000000000000000000000000000000000000000000000eee000ddeeed00
+-- 108:4400006744000666000000560000055600005567000055670000557700005666
+-- 109:7776670066667700665660006556600065567000555570005555700065556700
+-- 110:0a93eeee0933448f00044488000098880000a9990000aaa90000aaa90000aaa9
+-- 111:eedd8898dddddd88f34448888844888088888800889880008999880099aa9800
 -- 112:00000000000000000000000600044777024422ee2000eeee000eeeef000eeff0
 -- 113:deeeee670666677766555555ee655556eef667ffef777feef77700ee00000000
 -- 114:ff000000725600005625550066726655e7726666eff22222eeef2200eeee0000
@@ -1081,6 +1198,10 @@ end
 -- 117:000044409222222292aa22aa999a229998998288f8888222f800022200000000
 -- 118:0000000020000000aa8aa98e999f98ee888898ee8888feee0000fee200000000
 -- 119:0000000000000000e0000000e000000000000000000000000000000000000000
+-- 124:0000066600000eee00000eef00000eff00000eef00000eef0000eeff00000000
+-- 125:f6566670f066ff00f06feff0f0feef00000eef000000eff00000eef0000eeff0
+-- 126:0000aaa9000aaa90000aa99800009888000088ff0000888f0000088f0000888f
+-- 127:9aaa980009aa988009999980008888000888f0000888f0000088ff0000ffff00
 -- 128:0000000000000000000000000000000a00000aaa000009990000002200000044
 -- 129:000000000000000000000000af000000fff00000ff0000002200000044000000
 -- 130:00000000000000000000000000000000000aa90000a9999000a9449900224440

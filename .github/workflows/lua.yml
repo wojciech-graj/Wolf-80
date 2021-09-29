@@ -1,0 +1,13 @@
+name: Lua
+
+on: [push]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - name: lint
+        uses: nebularg/actions-luacheck@v1
+        with:
+          args: --config .luacheckrc

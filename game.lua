@@ -1,12 +1,11 @@
--- title:  Raycast FPS game
+-- title: Raycast FPS game
 -- author: Wojciech Graj
--- desc:   Raycast FPS game
+-- desc: Raycast FPS game
 -- script: lua
 -- input: gamepad
 
 --TODO:
 --doors
---hitmarkers
 
 function g_math_sign(x)
 	return x>0 and 1 or x<0 and -1 or 0
@@ -145,16 +144,15 @@ function Weapon:shoot(entity, target_type)
 			end
 		end
 
-		local wall_dist_sqr
-		if side == 0 then
-			local dist_x = side_dist_x - delta_dist_x
-			local dist_y = dist_x * dir_y / dir_x
-			wall_dist_sqr = dist_x * dist_x + dist_y * dist_y
-		else
-			local dist_y = side_dist_y - delta_dist_y
-			local dist_x = dist_y * dir_x / dir_y
-			wall_dist_sqr = dist_x * dist_x + dist_y * dist_y
-		end
+                local wall_dist
+                if side == 0 then
+                        wall_dist = side_dist_x - delta_dist_x
+                else --side == 1
+                        wall_dist = side_dist_y - delta_dist_y
+                end
+		local wall_dist_x = dir_x * wall_dist
+		local wall_dist_y = dir_y * wall_dist
+		local wall_dist_sqr = wall_dist * wall_dist
 
 		local max_dist_sqr = math.min(wall_dist_sqr, self.range_sqr)
 
@@ -183,8 +181,23 @@ function Weapon:shoot(entity, target_type)
 					end
 				end
 			end
+
 			if closest_enemy_dist_sqr < max_dist_sqr then
 				closest_enemy:damage(damage)
+				local dist = math.sqrt(closest_enemy_dist_sqr) - 0.1
+				hitmarker_set(
+					entity.pos_x + dir_x * dist,
+					entity.pos_y + dir_y * dist,
+					1
+				)
+			elseif wall_dist_sqr == max_dist_sqr then
+				if side == 0 then
+                                        local dx = step_x * -0.1
+					hitmarker_set(entity.pos_x + wall_dist_x + dx, entity.pos_y + wall_dist_y + dx * dir_y / dir_x, 0)
+				else --side == 1
+                                        local dy = step_y * -0.1
+					hitmarker_set(entity.pos_x + wall_dist_x + dy * dir_x / dir_y, entity.pos_y + wall_dist_y + dy, 0)
+				end
 			end
 		end
 	end
@@ -217,7 +230,7 @@ function Item.new(id, pos_x, pos_y, type, value)
 	self.type = type
 	self.value = value
 	if type == 3 then
-		self.sprite = Sprite.new(pos_x, pos_y, 69 + value, 4, 4, 0.75)
+		self.sprite = Sprite.new(pos_x, pos_y, 69 + value, 8, 4, 0.75)
 	else
 		self.sprite = Sprite.new(pos_x, pos_y, 64 + 2 * type, 4, 4, 0.75)
 	end
@@ -242,6 +255,44 @@ function Item:process(_delta)
 			player.keys[self.value] = 1
 		end
 		g_items[self.id] = nil
+	end
+end
+
+Hitmarker = {
+	visible = false,
+	timer = 0,
+	sprite = nil,
+}
+Hitmarker.__index = Hitmarker
+
+function Hitmarker.new()
+	local self = setmetatable({}, Hitmarker)
+	self.sprite = Sprite.new(0, 0, 0, 6, 6, 0)
+	return self
+end
+
+-- Hitmarker types
+-- 0: wall
+-- 1: enemy
+function hitmarker_set(pos_x, pos_y, type)
+	for _,hitmarker in pairs(g_hitmarkers) do
+		if not hitmarker.visible then
+			hitmarker.timer = 0
+			hitmarker.visible = true
+			hitmarker.sprite.pos_x = pos_x
+			hitmarker.sprite.pos_y = pos_y
+			hitmarker.sprite.tex_id = 59 + type
+			break
+		end
+	end
+end
+
+function Hitmarker:process(delta)
+	if self.visible then
+		self.timer = self.timer + delta
+		if self.timer > 200 then
+			self.visible = false
+		end
 	end
 end
 
@@ -483,20 +534,20 @@ function Enemy.new(id, type, pos_x, pos_y)
 		self.tex_ids = g_enemy_pistol_tex_ids
 		self.sprite = Sprite.new(pos_x, pos_y, 0, 1, 1.5, 0.25)
 		self.weapon = g_ENEMY_WEAPONS[1]
-		self.health = 70
+		self.health = 30
 		self.die_time = 1000
-		self.speed_move = 0.001
-		self.hitbox_rad = 0.4
+		self.speed_move = 0.002
+		self.hitbox_rad = 0.3
 		self.pain_time = 170
 		self.pain_chance = 0.7
 	elseif type == 1 then
 		self.tex_ids = g_enemy_shotgun_tex_ids
 		self.sprite = Sprite.new(pos_x, pos_y, 0, 1, 1.5, 0.25)
 		self.weapon = g_ENEMY_WEAPONS[2]
-		self.health = 130
+		self.health = 60
 		self.die_time = 1000
-		self.speed_move = 0.0003
-		self.hitbox_rad = 0.4
+		self.speed_move = 0.0015
+		self.hitbox_rad = 0.3
 		self.pain_time = 210
 		self.pain_chance = 0.61
 	end
@@ -596,16 +647,14 @@ function Enemy:process(delta)
 				break
 			end
 		end
-		local wall_dist_sqr
-		if side == 0 then
-			local dist_x = side_dist_x - delta_dist_x
-			local dist_y = dist_x * self.dir_y / self.dir_x
-			wall_dist_sqr = dist_x * dist_x + dist_y * dist_y
-		else
-			local dist_y = side_dist_y - delta_dist_y
-			local dist_x = dist_y * self.dir_x / self.dir_y
-			wall_dist_sqr = dist_x * dist_x + dist_y * dist_y
-		end
+
+                local wall_dist_sqr
+                if side == 0 then
+                        wall_dist_sqr = side_dist_x - delta_dist_x
+                else --side == 1
+                        wall_dist_sqr = side_dist_y - delta_dist_y
+                end
+		wall_dist_sqr = wall_dist_sqr * wall_dist_sqr
 
 		if self.shoot_dist_sqr < self.dist_sqr --player too far
 			or wall_dist_sqr < self.dist_sqr then --player not visible
@@ -715,6 +764,9 @@ function init()
 		[68]= {16,16},
 		[70]= {8 ,16},
 		[71]= {8 ,16},
+		--Hitmarkers
+		[59]= {8, 8 },
+		[60]= {8, 8 },
 	}
 	g_TEX_MAP = {
 		[1]=1,
@@ -732,13 +784,13 @@ function init()
 		Sprite.new(18.5, 6.5, 2, 2, 1, 0.125),
 	}
 	g_WEAPONS = {
-		Weapon.new(204, 99999999, 107, {234, 228},      300, 100, 0  , 0.005, 2, 20 , 1, 1),
-		Weapon.new(200, 50      , 113, {234, 228},      400, 100, 0  , 0.01 , 5, 15 , 1, 32),
-		Weapon.new(196, 20      , 113, {222, 216, 210}, 600, 150, 200, 0.01 , 5, 105, 7, 32),
+		Weapon.new(204, 99999999, 107, {234, 228},      300, 250, 0  , 0.05, 2, 20, 1, 1 ),
+		Weapon.new(200, 50      , 113, {234, 228},      350, 350, 0  , 0.00, 5, 15, 1, 32), --TODO
+		Weapon.new(196, 20      , 113, {222, 216, 210}, 400, 350, 350, 0.12, 5, 15, 7, 32),
 	}
 	g_ENEMY_WEAPONS = {
-		Weapon.new(0, 99999999, 0, nil, 400, 100, 0  , 0.4, 3, 15, 1, 32),
-		Weapon.new(0, 99999999, 0, nil, 600, 150, 200, 0.4, 3, 45, 3, 32),
+		Weapon.new(0, 99999999, 0, nil, 0, 350, 0  , 0.4, 3, 15, 1, 32),
+		Weapon.new(0, 99999999, 0, nil, 0, 350, 350, 0.4, 3, 15, 3, 32),
 	}
 	g_enemies = {
 		[1]=Enemy.new(1, 1, 16.6, 13),
@@ -750,6 +802,11 @@ function init()
 		[4]=Item.new(4, 19, 15, 3, 1),
 		[5]=Item.new(5, 19, 16, 3, 2),
 	}
+	g_NUM_HITMARKERS = 7
+	g_hitmarkers = {}
+	for i=1,g_NUM_HITMARKERS do
+		g_hitmarkers[i] = Hitmarker.new()
+	end
 	g_settings = {
 		floor_ceil = true,
 		interlace = 2, --disabled=g_interlace>=2
@@ -775,6 +832,7 @@ function TIC()
 	local sprites = g_sprites
 	local enemies = g_enemies
 	local items = g_items
+	local hitmarkers = g_hitmarkers
 	local settings = g_settings
 	local WEAPON_X = 111
 	local WEAPON_Y = 72
@@ -814,6 +872,9 @@ function TIC()
 			item:process(delta)
 		end
 	end
+	for _,hitmarker in pairs(hitmarkers) do
+		hitmarker:process(delta)
+	end
 
 	if btnp(5) then
 		settings.floor_ceil = not settings.floor_ceil
@@ -844,6 +905,15 @@ function TIC()
 	for _,item in pairs(items) do
 		if item ~= nil then
 			local sprite = item.sprite
+			sprite:process(inv_det)
+			if sprite.dist > 0 then
+				visible_sprites[#visible_sprites+1] = sprite
+			end
+		end
+	end
+	for _,hitmarker in pairs(hitmarkers) do
+		if hitmarker.visible then
+			local sprite = hitmarker.sprite
 			sprite:process(inv_det)
 			if sprite.dist > 0 then
 				visible_sprites[#visible_sprites+1] = sprite
@@ -1287,6 +1357,8 @@ end
 -- 056:0fff0000fffff000ff0ff000fffff000fffff000ff0ff000fffff0000fff0000
 -- 057:0fff0000fffff000ff0ff000fffff0000ffff000000ff0000ffff0000fff0000
 -- 058:000000000ffffff0ffffffffff0ff0ffffffffff0ffffff00000000000000000
+-- 059:00000000000ff00000feef000feddef00feddef000feef00000ff00000000000
+-- 060:0000200002020000002220200222220020222202002222200222020022020020
 -- 064:00000000000effff00deffff0ddeeeee0ddddddd0fffffff0fdddddd0f3deeee
 -- 065:00000000ffffe000ffffed00eeeeedd0ddddddd0fffffff0ddddddf0eeeed3f0
 -- 066:000000000000000000000000000000000000000000000d340000fd340000fedd

@@ -141,12 +141,12 @@ function Weapon:shoot(entity, target_type)
 			end
 		end
 
-                local wall_dist
-                if side == 0 then
-                        wall_dist = side_dist_x - delta_dist_x
-                else --side == 1
-                        wall_dist = side_dist_y - delta_dist_y
-                end
+		local wall_dist
+		if side == 0 then
+			wall_dist = side_dist_x - delta_dist_x
+		else --side == 1
+			wall_dist = side_dist_y - delta_dist_y
+		end
 		local wall_dist_x = dir_x * wall_dist
 		local wall_dist_y = dir_y * wall_dist
 		local wall_dist_sqr = wall_dist * wall_dist
@@ -189,10 +189,10 @@ function Weapon:shoot(entity, target_type)
 				)
 			elseif wall_dist_sqr == max_dist_sqr then
 				if side == 0 then
-                                        local dx = step_x * -0.1
+					local dx = step_x * -0.1
 					hitmarker_set(entity.pos_x + wall_dist_x + dx, entity.pos_y + wall_dist_y + dx * dir_y / dir_x, 0)
 				else --side == 1
-                                        local dy = step_y * -0.1
+					local dy = step_y * -0.1
 					hitmarker_set(entity.pos_x + wall_dist_x + dy * dir_x / dir_y, entity.pos_y + wall_dist_y + dy, 0)
 				end
 			end
@@ -250,8 +250,6 @@ function Item:process(_delta)
 			weapon.ammo = weapon.ammo + self.value
 		else --self.type == 3
 			player.keys[self.value] = 1
-                        local door = g_DOORS[self.value]
-                        mset(door[1], door[2], 0)
 		end
 		g_items[self.id] = nil
 	end
@@ -647,12 +645,12 @@ function Enemy:process(delta)
 			end
 		end
 
-                local wall_dist_sqr
-                if side == 0 then
-                        wall_dist_sqr = side_dist_x - delta_dist_x
-                else --side == 1
-                        wall_dist_sqr = side_dist_y - delta_dist_y
-                end
+		local wall_dist_sqr
+		if side == 0 then
+			wall_dist_sqr = side_dist_x - delta_dist_x
+		else --side == 1
+			wall_dist_sqr = side_dist_y - delta_dist_y
+		end
 		wall_dist_sqr = wall_dist_sqr * wall_dist_sqr
 
 		if self.shoot_dist_sqr < self.dist_sqr --player too far
@@ -720,6 +718,55 @@ function Enemy:damage(value)
 	end
 end
 
+Door = {
+	map_x = 0,
+	map_y = 0,
+	opening = false,
+	closed = true,
+	type = 1,
+	tex_id = 0,
+	height = 0,
+	timer = 0,
+}
+Door.__index = Door
+
+function Door.new(map_x, map_y, tex_id, type)
+	local self = setmetatable({}, Door)
+	self.map_x = map_x
+	self.map_y = map_y
+	self.tex_id = tex_id
+	self.type = type
+	return self
+end
+
+function Door:process(delta)
+	if self.closed then
+		if self.opening then
+			self.timer = self.timer + delta
+			if self.timer > 100 then
+				if self.height == 15 then
+					self.closed = false
+					mset(self.map_x, self.map_y, 0)
+				else
+					self.timer = 0
+					self.height = self.height + 1
+					mset(self.map_x, self.map_y, self.tex_id + 16 * self.height)
+				end
+			end
+		else
+			local player = g_player
+			if player.keys[self.type] == 1 then
+				local rel_pos_x = player.pos_x - self.map_x - 0.5
+				local rel_pos_y = player.pos_y - self.map_y - 0.5
+				local dist_sqr = rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y
+				if dist_sqr < 2.0 then
+					self.opening = true
+				end
+			end
+		end
+	end
+end
+
 function g_get_tex_pixel(offset, id, x, y)
 	return peek4(offset + 0x40 * (id + 16 * (y // 8) + x // 8) + 0x8 * (y % 8) + (x % 8))
 end
@@ -773,8 +820,8 @@ function init()
 		[3]=5,
 		[4]=7,
 		[5]=9,
-                [6]=11,
-                [7]=13,
+		[6]=11,
+		[7]=13,
 	}
 	g_player = Player.new(22, 12)
 	g_prev_time = 0
@@ -803,10 +850,10 @@ function init()
 		[4]=Item.new(4, 19, 15, 3, 1),
 		[5]=Item.new(5, 19, 16, 3, 2),
 	}
-        g_DOORS = {
-                [1]={18,3},
-                [2]={17,13},
-        }
+	g_doors = {
+		Door.new(18, 3 , 6, 1),
+		Door.new(17, 13, 7, 2),
+	}
 	g_NUM_HITMARKERS = 7
 	g_hitmarkers = {}
 	for i=1,g_NUM_HITMARKERS do
@@ -838,6 +885,7 @@ function TIC()
 	local enemies = g_enemies
 	local items = g_items
 	local hitmarkers = g_hitmarkers
+	local doors = g_doors
 	local settings = g_settings
 	local WEAPON_X = 111
 	local WEAPON_Y = 72
@@ -879,6 +927,9 @@ function TIC()
 	end
 	for _,hitmarker in pairs(hitmarkers) do
 		hitmarker:process(delta)
+	end
+	for _,door in pairs(doors) do
+		door:process(delta)
 	end
 
 	if btnp(5) then

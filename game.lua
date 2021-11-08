@@ -1,8 +1,10 @@
--- title: FPS-80
+-- title: Wolf-80
 -- author: Wojciech Graj
 -- desc: Raycast FPS game
 -- script: lua
 -- input: gamepad
+
+--TODO: automap
 
 function g_math_sign(x)
 	return x>0 and 1 or x<0 and -1 or 0

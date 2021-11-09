@@ -5,10 +5,12 @@ A 3D first-person shooter game on the TIC-80 virtual console, inspired by Wolfen
 Playable online [here](https://tic80.com/play?cart=2333)
 
 #### Features
-- 3D raycast graphics
-- 3 weapon types
-- 2 enemy types
+- 3D raycast graphics with floors, ceilings, and variable-height walls
+- 3 Weapons
+- 2 Enemy types
 - Item pickups
+- Minimap
+- Enemy AI with line-of-sight checks
 
 #### Planned Features
 - Multiple levels
